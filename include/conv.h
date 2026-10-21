@@ -45,5 +45,7 @@ struct conv {
 struct msg *conv_msg(struct conv *, int);
 struct block *conv_block(struct msg *, int);
 void conv_drop(struct conv *);
+int conv_save(stralloc *, const struct conv *);
+int conv_load(struct conv *, const char *, size_t);
 
 #endif

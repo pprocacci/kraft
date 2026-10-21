@@ -6,7 +6,7 @@
 .Nd coding agent
 .Sh SYNOPSIS
 .Nm
-.Op Fl ty
+.Op Fl rty
 .Op Fl a Ar api
 .Op Fl c Ar tokens
 .Op Fl m Ar model
@@ -36,7 +36,9 @@ Otherwise it prompts for tasks with
 until end of input.
 When standard input is not a terminal, each line is a task.
 The conversation is kept between tasks, so later tasks can refer to
-earlier ones.
+earlier ones, and saved, so that
+.Fl r
+can resume it.
 .Pp
 When the conversation grows to about three quarters of the model's
 context window,
@@ -71,6 +73,11 @@ The model to use.
 .It Fl n Ar max_tokens
 The most tokens the model may generate in one reply.
 The default is 16384.
+.It Fl r
+Resume the newest session started in the current directory,
+carrying on the conversation where it left off.
+Every session is saved as it goes; see
+.Sx FILES .
 .It Fl t
 Copy the model's reasoning, when the server sends it, to standard
 error.
@@ -260,6 +267,11 @@ The file may hold the bare key or a line such as
 .Ql export ANTHROPIC_API_KEY=... ;
 it is read, never run.
 It should be readable only by you.
+.It Pa ~/.kraft/sessions/
+Saved conversations, one file per session, rewritten after every
+step and readable only by you.
+They hold everything the model saw, file contents included; remove
+old ones when they are no longer wanted.
 .It Pa KRAFT.md
 Project instructions, read from the current directory and given to
 the model.
@@ -280,9 +292,12 @@ Have Claude fix a failing build, then exit:
 kraft -u https://api.anthropic.com -m claude-opus-5 \e
     'make fails; find out why and fix it'
 .Ed
-.Sh BUGS
-The conversation is not saved between runs.
 .Pp
+Pick up that conversation again later, in the same directory:
+.Bd -literal -offset indent
+kraft -r -u https://api.anthropic.com -m claude-opus-5
+.Ed
+.Sh BUGS
 In
 .Cm auto
 mode each call the rules cannot settle costs one extra request, and

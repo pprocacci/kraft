@@ -112,6 +112,26 @@ anthropic(void)
   check(feed(anth_event, m, &r, "{\"type\":\"error\",\"error\":{\"type\":"
       "\"overloaded_error\",\"message\":\"Overloaded\"}}") == API_ERROR &&
       is(&r.err, "Overloaded"), "anth error event");
+
+  /* a saved and reloaded conversation renders exactly the same */
+  {
+    struct conv d = { 0, 0, 0 };
+    stralloc s = STRALLOC_ZERO, o2 = STRALLOC_ZERO;
+
+    b->iserr = 1;
+    stralloc_cats(&b->text, "\n\"quoted\" \\ and \xc3\xa9 and \x01");
+    check(conv_save(&s, &c), "save");
+    stralloc_cats(&s, "{\"not a message\":1}\n");
+    check(conv_load(&d, s.s, s.len), "load");
+    check(d.n == c.n && d.m[1].n == 3 && d.m[1].b[0].type == BLK_THINK &&
+        is(&d.m[1].b[0].aux, "sig") && d.m[2].b[0].iserr, "load contents");
+    q.conv = &c;
+    anth_render(&o, &q);
+    q.conv = &d;
+    anth_render(&o2, &q);
+    check(o.len == o2.len && !memcmp(o.s, o2.s, o.len), "round trip");
+    check(!conv_load(&d, "{\"r\":7,\"b\":[]}\n", 15), "reject bad role");
+  }
 }
 
 static void

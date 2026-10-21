@@ -1,11 +1,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "anth.h"
 #include "api.h"
@@ -34,7 +38,7 @@
 #endif
 
 #define FATAL "kraft: fatal: "
-#define USAGE "kraft: usage: kraft [-ty] [-a anthropic|openai] [-c tokens] " \
+#define USAGE "kraft: usage: kraft [-rty] [-a anthropic|openai] [-c tokens] " \
     "[-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
@@ -583,6 +587,156 @@ compact(int carry)
   return 1;
 }
 
+/*
+ * Sessions.  The conversation is saved, whole and atomically, after
+ * every step to ~/.kraft/sessions/YYYYMMDD-HHMMSS-PID.json: a header
+ * line, then conv_save's lines.  -r carries on with the newest
+ * session started in the same directory.
+ */
+
+static void lines(const char *, const char *, size_t, unsigned long);
+
+static stralloc sessfn;   /* the session file, or empty */
+static stralloc cwdsa;    /* the working directory, NUL-terminated */
+static int savewarned;
+
+/* ~/.kraft/sessions/, created if need be; 0 if there is no $HOME */
+static int
+sessdir(stralloc *d)
+{
+  const char *home = env("HOME", 0);
+
+  if (!home) return 0;
+  if (!stralloc_copys(d, home) || !stralloc_cats(d, "/.kraft") ||
+      !stralloc_0(d))
+    nomem();
+  mkdir(d->s, 0700);
+  --d->len;
+  if (!stralloc_cats(d, "/sessions") || !stralloc_0(d)) nomem();
+  mkdir(d->s, 0700);
+  --d->len;
+  return 1;
+}
+
+/* picks a new session file; nothing is written until there is a message */
+static void
+newsession(void)
+{
+  char stamp[32];
+  time_t now = time(0);
+
+  if (!stralloc_copys(&sessfn, "")) nomem();
+  if (!sessdir(&sessfn)) return;
+  if (!strftime(stamp, sizeof stamp, "/%Y%m%d-%H%M%S-", localtime(&now)))
+    stamp[0] = 0;
+  if (!stralloc_cats(&sessfn, stamp) ||
+      !stralloc_catulong(&sessfn, (unsigned long)getpid()) ||
+      !stralloc_cats(&sessfn, ".json") || !stralloc_0(&sessfn))
+    nomem();
+}
+
+static void
+save(void)
+{
+  stralloc s = STRALLOC_ZERO;
+  int fd;
+
+  if (!sessfn.len || !conv.n) return;
+  if (!stralloc_copys(&s, "{\"kraft\":1,\"cwd\":") ||
+      !json_str(&s, cwdsa.s, str_len(cwdsa.s)) ||
+      !stralloc_cats(&s, ",\"api\":") ||
+      !json_str(&s, api->name, str_len(api->name)) ||
+      !stralloc_cats(&s, ",\"model\":") ||
+      !json_str(&s, model, str_len(model)) || !stralloc_cats(&s, "}\n") ||
+      !conv_save(&s, &conv))
+    nomem();
+  /* a new file is made private first; file_put keeps the mode */
+  fd = open(sessfn.s, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (fd != -1) close(fd);
+  if (!file_put(sessfn.s, s.s, s.len) && !savewarned) {
+    warnsys("unable to save the session to ", sessfn.s);
+    savewarned = 1;
+  }
+  stralloc_free(&s);
+}
+
+/* the header of a session file, if it is one started in dir */
+static int
+indir(const char *fn, const char *dir)
+{
+  char buf[8192];
+  const char *v;
+  size_t vn, e;
+  ssize_t r;
+  int fd, ok = 0;
+
+  if ((fd = open(fn, O_RDONLY | O_CLOEXEC)) == -1) return 0;
+  r = read(fd, buf, sizeof buf);
+  close(fd);
+  if (r <= 0) return 0;
+  e = byte_chr(buf, (size_t)r, '\n');
+  if (json_get(buf, e, "cwd", &v, &vn) && json_unstr(&tmp, v, vn) &&
+      stralloc_0(&tmp))
+    ok = !str_diff(tmp.s, dir);
+  return ok;
+}
+
+/* carries on with the newest session started here; 1 if there was one */
+static int
+resume(void)
+{
+  stralloc d = STRALLOC_ZERO, fn = STRALLOC_ZERO, best = STRALLOC_ZERO;
+  stralloc s = STRALLOC_ZERO;
+  struct dirent *e;
+  const struct msg *m;
+  DIR *dp;
+  size_t i, j, n;
+  int ok = 0;
+
+  if (!sessdir(&d) || !(dp = opendir(d.s))) goto out;
+  while ((e = readdir(dp))) {
+    n = str_len(e->d_name);
+    if (n < 6 || str_diff(e->d_name + n - 5, ".json")) continue;
+    if (best.len && str_diff(e->d_name, best.s + d.len + 1) <= 0) continue;
+    if (!stralloc_copy(&fn, &d) || !stralloc_cats(&fn, "/") ||
+        !stralloc_cats(&fn, e->d_name) || !stralloc_0(&fn))
+      nomem();
+    if (!stralloc_copys(&tmp, "")) nomem();
+    if (indir(fn.s, cwdsa.s) && !stralloc_copy(&best, &fn)) nomem();
+  }
+  closedir(dp);
+  if (!best.len) goto out;
+  if (!file_get(best.s, &s)) { warnsys("unable to read ", best.s); goto out; }
+  if (!conv_load(&conv, s.s, s.len)) {
+    warn("unable to load the session in ", best.s, 0);
+    while (conv.n) conv_drop(&conv);
+    goto out;
+  }
+  if (!stralloc_copy(&sessfn, &best)) nomem();
+  pending = s.len;  /* about the size of the conversation, for compacting */
+
+  /* a reminder of where things stood */
+  outs("(resumed the session in ");
+  outs(best.s);
+  outs(")\n");
+  for (i = conv.n; i-- > 0;) {
+    m = &conv.m[i];
+    if (m->role != ROLE_USER) continue;
+    for (j = m->n; j-- > 0;)
+      if (m->b[j].type == BLK_TEXT && m->b[j].text.len) break;
+    if (j == (size_t)-1) continue;
+    lines("  last request: ", m->b[j].text.s, m->b[j].text.len, 1);
+    break;
+  }
+  ok = 1;
+out:
+  stralloc_free(&d);
+  stralloc_free(&fn);
+  stralloc_free(&best);
+  stralloc_free(&s);
+  return ok;
+}
+
 static int
 hastools(const struct msg *m)
 {
@@ -884,7 +1038,7 @@ interrupted(void)
 
 /* carries out one task: the user's words, then model and tools in turn */
 static void
-task(const char *s, size_t n)
+work(const char *s, size_t n)
 {
   struct msg *m;
   struct block *b;
@@ -924,12 +1078,20 @@ task(const char *s, size_t n)
     }
     stop = reply.stop;  /* the auto-mode check reuses reply */
     if (!runtools(stop == STOP_MAX)) { interrupted(); return; }
+    save();
     if (stop == STOP_MAX) {
       warn("the reply was cut off at max_tokens; raise it with -n", 0, 0);
       return;
     }
   }
   warn("stopped: too many steps for one task", 0, 0);
+}
+
+static void
+task(const char *s, size_t n)
+{
+  work(s, n);
+  save();
 }
 
 static void
@@ -1002,7 +1164,8 @@ int
 main(int argc, char **argv)
 {
   const char *aname, *key;
-  int opt;
+  int opt, again = 0;
+  char cwd[PATH_MAX];
   size_t i;
   struct sigaction sa;
   int r;
@@ -1020,7 +1183,7 @@ main(int argc, char **argv)
   if ((key = env("KRAFT_CONTEXT", 0)) &&
       (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
     strerr_die(100, FATAL, "KRAFT_CONTEXT must be a number of tokens", 0);
-  while ((opt = getopt(argc, argv, "a:c:m:n:P:tu:y")) != -1)
+  while ((opt = getopt(argc, argv, "a:c:m:n:P:rtu:y")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
     case 'c':
@@ -1034,6 +1197,7 @@ main(int argc, char **argv)
         strerr_die(100, USAGE, 0, 0);
       break;
     case 'P': if (!pickmode(optarg)) strerr_die(100, USAGE, 0, 0); break;
+    case 'r': again = 1; break;
     case 't': showthink = 1; break;
     case 'u': base = optarg; break;
     case 'y': mode = MODE_YES; break;
@@ -1082,6 +1246,11 @@ main(int argc, char **argv)
   if (!stralloc_0(&hdrs) || !stralloc_0(&ghdrs)) nomem();
   mksystem();
   if (!ctxwin) findwindow();
+  if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||
+      !stralloc_0(&cwdsa))
+    nomem();
+  if (again && !resume()) outs("(no earlier session in this directory)\n");
+  if (!sessfn.len) newsession();
 
   /* a task on the command line: do it and exit */
   if (*argv) {
@@ -1123,6 +1292,9 @@ main(int argc, char **argv)
     if (!str_diff(line.s, "/help")) { help(); continue; }
     if (!str_diff(line.s, "/clear")) {
       while (conv.n) conv_drop(&conv);
+      lastmain = nousage;
+      pending = 0;
+      newsession();  /* the old one stays saved, for -r */
       outs("(conversation cleared)\n");
       continue;
     }
@@ -1131,11 +1303,12 @@ main(int argc, char **argv)
     if (!str_diff(line.s, "/compact")) {
       intr = 0;
       if (!conv.n) outs("(nothing to compact)\n");
-      else compact(0);
+      else if (compact(0)) save();
       continue;
     }
     if (str_start(line.s, "/mode ")) {
-      if (!pickmode(line.s + 6)) outs("(modes are ask, auto and yes)\n");
+      if (!pickmode(line.s + 6))
+        outs("(modes are ask, rules, auto and yes)\n");
       else showmode();
       continue;
     }
