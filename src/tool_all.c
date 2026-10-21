@@ -32,6 +32,21 @@ const struct tool tool_all[] = {
     "\"description\":\"Replace every occurrence\"}},"
     "\"required\":[\"path\",\"old_string\",\"new_string\"]}",
     1, tool_edit },
+  { "multi_edit",
+    "Make several exact replacements in one file at once. The edits are "
+    "applied in order, each to the result of the one before, with the "
+    "same rules as edit_file; if any fails, the file is left unchanged. "
+    "Prefer it to several edit_file calls on the same file.",
+    "{\"type\":\"object\",\"properties\":{"
+    "\"path\":{\"type\":\"string\",\"description\":\"File to edit\"},"
+    "\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\","
+    "\"properties\":{"
+    "\"old_string\":{\"type\":\"string\"},"
+    "\"new_string\":{\"type\":\"string\"},"
+    "\"replace_all\":{\"type\":\"boolean\"}},"
+    "\"required\":[\"old_string\",\"new_string\"]}}},"
+    "\"required\":[\"path\",\"edits\"]}",
+    1, tool_multiedit },
   { "bash",
     "Run a command with /bin/sh in the working directory and return its "
     "combined stdout and stderr. Stdin is /dev/null, so the command must "
@@ -68,5 +83,30 @@ const struct tool tool_all[] = {
     "\"path\":{\"type\":\"string\",\"description\":\"Directory; default .\"}},"
     "\"required\":[]}",
     0, tool_ls },
+  { "web_fetch",
+    "Fetch a web page or file over http or https and return its text; "
+    "HTML is turned into plain text. Use it for documentation, release "
+    "notes, bug reports and the like. Only text is returned, at most "
+    "max_length bytes (default 20000).",
+    "{\"type\":\"object\",\"properties\":{"
+    "\"url\":{\"type\":\"string\",\"description\":\"The http(s) URL\"},"
+    "\"max_length\":{\"type\":\"integer\","
+    "\"description\":\"Most bytes of text to return\"}},"
+    "\"required\":[\"url\"]}",
+    1, tool_fetch },
+  { "todo",
+    "Keep a checklist for a task with several steps, which the user "
+    "sees. Send the whole list each time it changes; mark one item "
+    "in_progress while you work on it and completed as soon as it is "
+    "done. Skip it for simple tasks.",
+    "{\"type\":\"object\",\"properties\":{"
+    "\"todos\":{\"type\":\"array\",\"items\":{\"type\":\"object\","
+    "\"properties\":{"
+    "\"content\":{\"type\":\"string\",\"description\":\"The step\"},"
+    "\"status\":{\"type\":\"string\","
+    "\"enum\":[\"pending\",\"in_progress\",\"completed\"]}},"
+    "\"required\":[\"content\",\"status\"]}}},"
+    "\"required\":[\"todos\"]}",
+    0, tool_todo },
   { 0, 0, 0, 0, 0 }
 };

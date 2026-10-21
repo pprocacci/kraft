@@ -463,7 +463,8 @@ perm_auto(const char *name, const char *in, size_t n, stralloc *why)
   int ok = 0;
 
   hard = reasoned = 0;
-  if (!str_diff(name, "write_file") || !str_diff(name, "edit_file")) {
+  if (!str_diff(name, "write_file") || !str_diff(name, "edit_file") ||
+      !str_diff(name, "multi_edit")) {
     if (!tool_arg(in, n, "path", &a)) no(why, "no path given", 0);
     else if (path_secret(a.s))
       never(why, "the file is one of kraft's private files", 0);

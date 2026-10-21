@@ -38,16 +38,16 @@ kraft.o: kraft.c VERSION
 	${CC} ${CFLAGS} -c $< -o $@
 
 t/json: t/json.c libkraft.a
-	${CC} ${CFLAGS} ${LDFLAGS} -o t/json t/json.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/json t/json.c libkraft.a ${LDLIBS}
 
 t/sse: t/sse.c libkraft.a
-	${CC} ${CFLAGS} ${LDFLAGS} -o t/sse t/sse.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/sse t/sse.c libkraft.a ${LDLIBS}
 
 t/conv: t/conv.c libkraft.a
-	${CC} ${CFLAGS} ${LDFLAGS} -o t/conv t/conv.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/conv t/conv.c libkraft.a ${LDLIBS}
 
 t/perm: t/perm.c libkraft.a
-	${CC} ${CFLAGS} ${LDFLAGS} -o t/perm t/perm.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/perm t/perm.c libkraft.a ${LDLIBS}
 
 test: ${TESTS}
 	./t/json

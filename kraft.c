@@ -800,7 +800,7 @@ lines(const char *p, const char *s, size_t n, unsigned long max)
 static void
 announce(const struct block *b, const char *in, size_t n)
 {
-  static const char *keys[] = { "command", "path", "pattern", 0 };
+  static const char *keys[] = { "command", "path", "pattern", "url", 0 };
   size_t i, k;
 
   nl();
@@ -970,6 +970,22 @@ approve(const struct tool *t, const char *in, size_t n)
     if (tool_arg(in, n, "new_string", &tmp)) lines("  + ", tmp.s, tmp.len, 20);
   } else if (!str_diff(t->name, "write_file")) {
     if (tool_arg(in, n, "content", &tmp)) lines("  + ", tmp.s, tmp.len, 20);
+  } else if (!str_diff(t->name, "multi_edit")) {
+    static stralloc key;
+    const char *e;
+    size_t en;
+    unsigned long k;
+
+    for (k = 0; k < 8; ++k) {
+      if (!stralloc_copys(&key, "edits.") || !stralloc_catulong(&key, k) ||
+          !stralloc_0(&key))
+        nomem();
+      if (!json_get(in, n, key.s, &e, &en)) break;
+      if (tool_arg(e, en, "old_string", &tmp)) lines("  - ", tmp.s, tmp.len, 8);
+      if (tool_arg(e, en, "new_string", &tmp)) lines("  + ", tmp.s, tmp.len, 8);
+    }
+  } else if (!str_diff(t->name, "web_fetch")) {
+    if (tool_arg(in, n, "url", &tmp)) lines("  GET ", tmp.s, tmp.len, 1);
   }
   flush();
   c = ui_ask("  Allow? [y]es, [n]o, [a]lways for this session: ");
@@ -1036,7 +1052,8 @@ runtools(int cut)
       }
     }
     pending += res->text.len + 100;  /* and the result's framing */
-    lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len, 4);
+    lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len,
+        !res->iserr && !str_diff(t->name ? t->name : "", "todo") ? 100 : 4);
     flush();
   }
   if (intr) warn("interrupted", 0, 0);

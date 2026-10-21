@@ -30,5 +30,8 @@ int tool_bash(const char *, size_t, stralloc *);
 int tool_find(const char *, size_t, stralloc *);
 int tool_grep(const char *, size_t, stralloc *);
 int tool_ls(const char *, size_t, stralloc *);
+int tool_fetch(const char *, size_t, stralloc *);
+int tool_multiedit(const char *, size_t, stralloc *);
+int tool_todo(const char *, size_t, stralloc *);
 
 #endif
