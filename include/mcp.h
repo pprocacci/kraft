@@ -23,6 +23,9 @@ struct mcp {
   struct url u;
   stralloc hosthdr; /* host[:port], for Host: */
   stralloc session; /* Mcp-Session-Id, or empty */
+  stralloc token;   /* an OAuth access token, or empty */
+  int status;       /* the last HTTP status */
+  stralloc auth;    /* and its WWW-Authenticate, NUL-terminated */
   unsigned long id; /* the last request's */
   stralloc buf;     /* read but not yet used */
   stralloc line;

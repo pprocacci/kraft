@@ -251,3 +251,7 @@ unsigned long nhooks;
 /* calls run side by side */
 int inchild;
 int lockfd = -1;
+
+/* a command to open a login page with, or 0 */
+const char *browser;
+const char *mcpcid[MAXMCP], *mcpcsecret[MAXMCP];

@@ -82,6 +82,10 @@ is asked about unless a rule allows it:
   mcp gh https://api.githubcopilot.com/mcp/
   mcp_header gh Authorization: Bearer ${GITHUB_TOKEN}
 
+A remote server that wants a login gets one with OAuth: kraft offers it
+at startup, or run /mcp login NAME.  Over ssh, paste the address the
+browser ends up at.
+
 Hooks run your commands around tool calls and after tasks:
 
   hook after edit case "$KRAFT_PATH" in *.c) clang-format -i "$KRAFT_PATH";; esac

@@ -6,6 +6,8 @@
  */
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -35,6 +37,7 @@
 #include "md.h"
 #include "media.h"
 #include "oai.h"
+#include "oauth.h"
 #include "path.h"
 #include "perm.h"
 #include "proc.h"
@@ -272,6 +275,27 @@ struct hook {
 extern struct hook hooks[MAXHOOKS];
 extern unsigned long nhooks;
 int hook(int when, const struct tool *t, const char *in, size_t n, const stralloc *result, int failed, stralloc *out);
+
+/* OAuth for MCP servers on HTTP: a login, kept in ~/.kraft/mcp-auth/ */
+struct mcpcred {
+  stralloc url;       /* the server's, which the rest is for */
+  stralloc issuer;    /* the authorization server's */
+  stralloc tokenep;   /* its token endpoint */
+  stralloc clientid, secret, method;  /* how kraft is known to it */
+  stralloc access, refresh;
+  unsigned long expires;  /* when access runs out (time()), or 0 */
+};
+#define LOOPBACKPORT 33418  /* for a client registered by hand */
+int mcpup(unsigned long k, stralloc *why);
+int mcpcredload(unsigned long k, struct mcpcred *c);
+int mcpcredsave(unsigned long k, const struct mcpcred *c);
+void mcpcredfn(unsigned long k, stralloc *fn);
+int mcptokenreq(struct mcpcred *c, stralloc *form, stralloc *why);
+int mcpauth(unsigned long k, int renew);
+int mcplogin(unsigned long k);
+void mcplogout(unsigned long k);
+extern const char *browser;
+extern const char *mcpcid[MAXMCP], *mcpcsecret[MAXMCP];  /* mcp_client */
 
 /* calls run side by side */
 extern int inchild;  /* this is a process running one of them */

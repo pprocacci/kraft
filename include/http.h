@@ -20,6 +20,7 @@ struct http {
   stralloc loc;            /* Location, NUL-terminated, or empty */
   stralloc ctype;          /* Content-Type, NUL-terminated, or empty */
   stralloc session;        /* Mcp-Session-Id, NUL-terminated, or empty */
+  stralloc auth;           /* WWW-Authenticate, NUL-terminated, or empty */
 };
 
 int http_request(int, const char *, const char *, const char *,

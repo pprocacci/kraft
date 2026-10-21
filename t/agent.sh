@@ -47,6 +47,7 @@ fail() {
 status() { [ "$status" = "$1" ] || fail "exit status $status, not $1"; }
 out() { grep -q -- "$1" "$T/out" || fail "stdout lacks: $1"; }
 err() { grep -q -- "$1" "$T/err" || fail "stderr lacks: $1"; }
+said() { grep -q -- "$1" "$T/out" "$T/err" || fail "neither stdout nor stderr has: $1"; }
 noerr() { ! grep -q -- "$1" "$T/err" || fail "stderr has: $1"; }
 req() { grep -q -- "$2" "$T/log/$1" 2>/dev/null || fail "request $1 lacks: $2"; }
 reqs() {
@@ -408,6 +409,73 @@ status 0
 err "MCP server web"
 err "HTTP 401"
 kill $mpid 2>/dev/null
+
+# the toy server with OAuth, for the next three; fetch(1) plays the
+# browser, following the authorization server's redirect back to kraft
+rm -f "$T/oport"
+MCPD_USES=8 "$top/t/mcpd" -o "$T/oport" &
+opid=$!
+i=0
+while [ ! -s "$T/oport" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+ourl="http://127.0.0.1:$(cat "$T/oport")/mcp"
+
+setup "OAuth: /mcp login, then its tools" <<EOF
+reply
+tool mcp__web__echo {"text":"after the login"}
+reply
+text Done.
+EOF
+printf 'mcp web %s\nbrowser fetch -q -o /dev/null\n' "$ourl" > "$T/home/.kraft/config"
+printf '/mcp login web\nuse it\n' | run -P yes
+status 0
+said "wants you to log in"
+out "To log in to MCP server"
+out "code_challenge_method=S256"
+out "logged in to web"
+req 1 "mcp__web__echo"
+req 2 "after the login"
+a=$T/home/.kraft/mcp-auth/web.json
+[ -f "$a" ] || fail "no saved login"
+[ "$(stat -f %Lp "$a" 2>/dev/null)" = 600 ] || fail "the saved login is not mode 600"
+grep -q '"access_token":"tok1"' "$a" || fail "the saved login lacks the token"
+grep -q '"refresh_token":"ref1"' "$a" || fail "the saved login lacks the refresh token"
+
+setup "OAuth: the saved login, renewed when it runs out" <<EOF
+reply
+tool mcp__web__echo {"text":"one"}
+tool mcp__web__echo {"text":"two"}
+tool mcp__web__echo {"text":"three"}
+reply
+text Done.
+EOF
+mkdir -p "$T/home/.kraft/mcp-auth"
+cat > "$T/home/.kraft/mcp-auth/web.json" <<SAVED
+{"url":"$ourl","issuer":"x","token_endpoint":"${ourl%/mcp}/auth/token","client_id":"c1","client_secret":"","auth_method":"none","access_token":"tok1","refresh_token":"ref1","expires_at":0}
+SAVED
+chmod 600 "$T/home/.kraft/mcp-auth/web.json"
+printf 'mcp web %s\n' "$ourl" > "$T/home/.kraft/config"
+run -P yes -p "go"
+status 0
+noerr "wants you to log in"
+req 2 '"one'
+req 2 '"three'
+! grep -q "MCP server web" "$T/log/2" || fail "a call failed for want of a login"
+grep -q '"access_token":"tok[2-9]"' "$T/home/.kraft/mcp-auth/web.json" ||
+    fail "the login was not renewed"
+
+setup "OAuth: a login is not sent to another URL; /mcp logout" <<EOF
+reply
+text OK.
+EOF
+mkdir -p "$T/home/.kraft/mcp-auth"
+echo '{"url":"http://elsewhere/mcp","access_token":"tok1","refresh_token":"ref1","token_endpoint":"http://127.0.0.1:1/t","client_id":"c1"}' \
+    > "$T/home/.kraft/mcp-auth/web.json"
+printf 'mcp web %s\n' "$ourl" > "$T/home/.kraft/config"
+printf '/mcp logout web\n' | run
+said "wants you to log in"
+out "logged out of web"
+[ ! -e "$T/home/.kraft/mcp-auth/web.json" ] || fail "the login is still there"
+kill $opid 2>/dev/null
 
 if [ -x /usr/local/bin/uctags ]; then
 setup "symbols: definitions from ctags" <<EOF

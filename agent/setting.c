@@ -75,6 +75,32 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
     ++nhooks;
     return 1;
   }
+  if (!str_diff(k, "mcp_client")) {
+    /* mcp_client NAME CLIENT_ID [SECRET], for a server without registration */
+    i = byte_chr(v, str_len(v), ' ');
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    for (u = 0; u < nmcps && str_diff(mcps[u].name, word.s); ++u) ;
+    if (u == nmcps) {
+      kwarn(tmp.s, "mcp_client for an MCP server not yet named: ", word.s);
+      return 1;
+    }
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    v += i;
+    i = byte_chr(v, str_len(v), ' ');
+    if (!i) {
+      kwarn(tmp.s, "mcp_client needs a server and a client id", 0);
+      return 1;
+    }
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    mcpcid[u] = sdup(word.s);
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    mcpcsecret[u] = v[i] ? sdup(v + i) : 0;
+    return 1;
+  }
+  if (!str_diff(k, "browser")) {
+    browser = sdup(v);
+    return 1;
+  }
   if (!str_diff(k, "mcp_header")) {
     /* mcp_header NAME Header: value, with ${VAR} from the environment */
     i = byte_chr(v, str_len(v), ' ');
@@ -129,7 +155,9 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
     if (u == nmcps) mcps[nmcps++].name = sdup(word.s);
     /* the project's may replace the user's, but not take its headers */
     mcps[u].cmd = sdup(v + i);
+    mcps[u].http = str_start(v + i, "http://") || str_start(v + i, "https://");
     mcps[u].hdrs.len = 0;
+    mcpcid[u] = mcpcsecret[u] = 0;
     return 1;
   }
   if (!str_diff(k, "api")) cfgapi = sdup(v);

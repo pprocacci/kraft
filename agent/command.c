@@ -22,7 +22,8 @@ help(void)
       "  /model    show or change the model\n"
       "  /usage    show tokens used, cache hits, context size, and cost\n"
       "  /rules    list the allow and deny rules from the config files\n"
-      "  /mcp      list the MCP servers and their tools\n"
+      "  /mcp      list the MCP servers and their tools; /mcp login NAME\n"
+      "            and /mcp logout NAME for one that wants a login\n"
       "  /diff     show the uncommitted changes (in a git repository)\n"
       "  /commit   have the model commit them, with a fitting message\n"
       "  /help     show this\n"
@@ -128,6 +129,51 @@ showrules(void)
     sgr(0);
     outs("\n");
   }
+}
+
+/* /mcp login NAME, /mcp logout NAME */
+static void
+mcpcmd(const char *line)
+{
+  static stralloc why;
+  const char *name = line + (str_start(line, "/mcp login ") ? 11 : 12);
+  char was[sizeof tools / sizeof tools[0]][80];
+  unsigned long k;
+  size_t i, j;
+
+  while (*name == ' ') ++name;
+  for (k = 0; k < nmcps && str_diff(mcps[k].name, name); ++k) ;
+  if (k == nmcps) {
+    kwarn("there is no MCP server called ", name, " (/mcp lists them)");
+    return;
+  }
+  if (line[5] == 'l' && line[8] == 'o' && line[9] == 'u') {  /* logout */
+    mcplogout(k);
+    return;
+  }
+  if (!mcplogin(k)) return;
+  if (!stralloc_copys(&why, "")) nomem();
+  /* its tools may be new: the list changes, the answers "a" stay */
+  for (i = 0; tools[i].name; ++i) {
+    was[i][0] = 0;
+    if (allowed[i] && str_len(tools[i].name) < sizeof was[i])
+      byte_copy(was[i], str_len(tools[i].name) + 1, tools[i].name);
+  }
+  was[i][0] = 1;  /* the end */
+  if (!mcpup(k, &why)) {
+    if (!stralloc_0(&why)) nomem();
+    kwarn("MCP server ", mcps[k].name, " did not start");
+    outs("  (");
+    outs(why.s);
+    outs(")\n");
+  }
+  settools();
+  for (i = 0; tools[i].name; ++i) {
+    allowed[i] = 0;
+    for (j = 0; was[j][0] != 1; ++j)
+      if (was[j][0] && !str_diff(was[j], tools[i].name)) allowed[i] = 1;
+  }
+  mcplist();
 }
 
 static void
@@ -273,6 +319,10 @@ command(const char *line)
   }
   if (!str_diff(line, "/rules")) { showrules(); return 1; }
   if (!str_diff(line, "/mcp")) { mcplist(); return 1; }
+  if (str_start(line, "/mcp login ") || str_start(line, "/mcp logout ")) {
+    mcpcmd(line);
+    return 1;
+  }
   if (!str_diff(line, "/diff")) { showdiff(); return 1; }
   if (!str_diff(line, "/commit")) {
     if (!ingit) { outs("(not in a git repository)\n"); return 1; }

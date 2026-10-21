@@ -30,6 +30,8 @@ mcpread(const char *server, size_t n, const char *uri, stralloc *out)
     nomem();
   plock(1);
   r = mcp_rpc(&mcps[k], "resources/read", params.s, &res, 120, &intr);
+  if (!r && mcps[k].http && mcps[k].status == 401 && mcpauth(k, 1))
+    r = mcp_rpc(&mcps[k], "resources/read", params.s, &res, 120, &intr);
   plock(0);
   if (!r) {
     if (!stralloc_copys(out, "MCP server ") ||

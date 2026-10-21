@@ -36,8 +36,11 @@ mcp_post(struct mcp *m, const char *s, size_t n, const char *id, size_t idn,
       (m->id > 1 && !stralloc_cats(&hdrs, "MCP-Protocol-Version: 2025-06-18\r\n")) ||
       (m->session.len && (!stralloc_cats(&hdrs, "Mcp-Session-Id: ") ||
       !stralloc_cat(&hdrs, &m->session) || !stralloc_cats(&hdrs, "\r\n"))) ||
+      (m->token.len && (!stralloc_cats(&hdrs, "Authorization: Bearer ") ||
+      !stralloc_cat(&hdrs, &m->token) || !stralloc_cats(&hdrs, "\r\n"))) ||
       !stralloc_cat(&hdrs, &m->hdrs) || !stralloc_0(&hdrs))
     goto nomem;
+  m->status = 0;
   if ((fd = tcp_connect(m->u.host.s, m->u.port.s, CONNECTSECS)) == -1) {
     stralloc_copys(out, "unable to connect: ");
     stralloc_cats(out, strerror(errno));
@@ -58,11 +61,16 @@ mcp_post(struct mcp *m, const char *s, size_t n, const char *id, size_t idn,
       h.session.len - 1))
     goto nomem;
 
+  m->status = h.status;
+  if (!stralloc_copy(&m->auth, &h.auth)) goto nomem;
   if (h.status / 100 != 2) {
     stralloc_copys(out, "HTTP ");
     stralloc_catulong(out, (unsigned long)h.status);
-    if (h.status == 401 || h.status == 403)
-      stralloc_cats(out, " (credentials are needed: see mcp_header in kraft(1))");
+    if (h.status == 401)
+      stralloc_cats(out, m->token.len ? " (the login has run out: /mcp login)" :
+          " (it wants you to log in: /mcp login)");
+    else if (h.status == 403)
+      stralloc_cats(out, " (not allowed)");
     else if (h.status == 404 && m->session.len)
       stralloc_cats(out, " (the server has forgotten the session)");
     goto out;
@@ -101,5 +109,6 @@ out:
   stralloc_free(&h.loc);
   stralloc_free(&h.ctype);
   stralloc_free(&h.session);
+  stralloc_free(&h.auth);
   return got;
 }

@@ -50,6 +50,8 @@ mcpcall(const struct tool *t, const char *in, size_t n, stralloc *out)
     nomem();
   plock(1);  /* one at a time on its pipes */
   r = mcp_rpc(m, "tools/call", params.s, &res, CALLSECS, &intr);
+  if (!r && m->http && m->status == 401 && mcpauth((unsigned long)(t->mcp - 1), 1))
+    r = mcp_rpc(m, "tools/call", params.s, &res, CALLSECS, &intr);  /* renewed */
   plock(0);
   if (!r) {
     if (!stralloc_copys(out, "MCP server ") || !stralloc_cats(out, m->name) ||

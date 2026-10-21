@@ -28,6 +28,7 @@
 #include "md.h"
 #include "media.h"
 #include "oai.h"
+#include "oauth.h"
 #include "perm.h"
 #include "sse.h"
 #include "stralloc.h"
@@ -206,6 +207,11 @@ mcpmsg(const char *s, size_t n)
   static struct mcp m;  /* not up: an answer to the server goes nowhere */
 
   mcp_take(&m, s, n, "7", 1, &a);
+  /* a WWW-Authenticate challenge; a redirect, pasted or not */
+  www_param(s, n, "resource_metadata", &a);
+  www_param(s, n, "scope", &a);
+  url_param(s, n, "code", &a);
+  url_param(s, n, "state", &a);
 }
 
 int

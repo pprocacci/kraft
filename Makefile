@@ -20,7 +20,7 @@ HDRS!=		echo include/*.h
 LIBOBJS=	${LIBSRCS:.c=.o}
 AGENTSRCS!=	echo agent/*.c
 AGENTOBJS=	${AGENTSRCS:.c=.o}
-TESTS=		t/json t/sse t/conv t/perm t/mcp t/mcpd t/fakeapi
+TESTS=		t/json t/sse t/conv t/perm t/mcp t/mcpd t/fakeapi t/oauth
 
 all: kraft
 
@@ -61,12 +61,16 @@ t/mcpd: t/mcpd.c libkraft.a
 t/fakeapi: t/fakeapi.c libkraft.a
 	${CC} ${CFLAGS} ${LDFLAGS} -o t/fakeapi t/fakeapi.c libkraft.a ${LDLIBS}
 
+t/oauth: t/oauth.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/oauth t/oauth.c libkraft.a ${LDLIBS}
+
 test: kraft ${TESTS}
 	./t/json
 	./t/sse
 	./t/conv
 	./t/perm
 	./t/mcp
+	./t/oauth
 	sh t/agent.sh
 
 # the fuzz harness: libFuzzer, with the address and undefined

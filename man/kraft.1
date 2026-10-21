@@ -315,7 +315,10 @@ and
 .Cm yes
 or
 .Cm no ) ,
-as for the options and environment variables of the same meaning.
+as for the options and environment variables of the same meaning;
+and
+.Cm browser ,
+a command to open login pages with (the address is added to it).
 .Pp
 .Cm allow Ar tool pattern
 and
@@ -437,14 +440,47 @@ is replaced by the environment variable
 so that a token need not be written in the file.
 A project's config that names a server of yours does not get your
 headers for it.
-OAuth is not supported; a server that needs it may accept a token
-made by hand.
 For example:
 .Bd -literal -offset indent
 mcp fs npx -y @modelcontextprotocol/server-filesystem /home/me/notes
 mcp gh https://api.githubcopilot.com/mcp/
 mcp_header gh Authorization: Bearer ${GITHUB_TOKEN}
 .Ed
+.Pp
+An HTTP server that wants you to log in (it answers 401) gets an
+OAuth login, as MCP's authorization specifies.
+At a terminal
+.Nm
+offers one when it starts;
+.Cm /mcp login Ar name
+does it at any time.
+It finds the server's authorization server, registers itself there
+if it can, and shows the address to log in at, which is opened with
+the
+.Cm browser
+setting's command, or
+.Ev BROWSER ,
+if there is one.
+The browser comes back to
+.Nm
+on 127.0.0.1; if it is on another machine, as over
+.Xr ssh 1 ,
+paste the address it ends up at (the page will not load) at the
+prompt instead.
+Control-D gives up.
+The login uses PKCE, and its tokens are kept in
+.Pa ~/.kraft/mcp-auth/ ,
+readable only by you, for that server's URL alone; they are renewed
+when they run out, and
+.Cm /mcp logout Ar name
+forgets them.
+For an authorization server that cannot register clients,
+.Cm mcp_client Ar name client_id Op Ar secret ,
+after the
+.Cm mcp
+line, names a client registered by hand, with
+.Li http://127.0.0.1:33418/callback
+as its redirect URI.
 .Pp
 As there is no knowing what another program's tools do, every call
 is subject to the permission mode; a rule such as
@@ -600,8 +636,11 @@ can be undone, not what commands did.
 .It Cm /rules
 List the permission rules in force, and where each came from.
 .It Cm /mcp
-List the MCP servers, whether each is running, and their tools,
-prompts and resources.
+List the MCP servers, whether each is running (or logged in), and
+their tools, prompts and resources.
+.It Cm /mcp login Ar name , Cm /mcp logout Ar name
+Log in to an MCP server on HTTP, or forget the login; see
+.Sx CONFIGURATION .
 .It Cm /diff
 Show the uncommitted changes, in a git repository.
 .It Cm /commit
@@ -678,6 +717,10 @@ Default for
 .Fl u .
 .It Ev NO_COLOR
 If set, no colour or other terminal attributes are used.
+.It Ev BROWSER
+A command to open an MCP server's login page with, unless the
+.Cm browser
+setting names one.
 .It Ev KRAFT_API_KEY
 The key to send.
 If unset,
@@ -712,6 +755,10 @@ The project config files you have trusted, with a hash of each.
 The standard error of MCP server
 .Ar name ,
 from its last start.
+.It Pa ~/.kraft/mcp-auth/ Ns Ar name Ns Pa .json
+The OAuth login for MCP server
+.Ar name :
+as good as a password, and readable only by you.
 .It Pa ~/.kraft/KRAFT.md
 Instructions for every project, given to the model first.
 .It Pa KRAFT.md

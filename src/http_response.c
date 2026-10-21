@@ -44,7 +44,8 @@ http_response(struct http *h, int fd)
   h->retry = 0;
   if (!stralloc_copys(&h->loc, "") || !stralloc_0(&h->loc) ||
       !stralloc_copys(&h->ctype, "") || !stralloc_0(&h->ctype) ||
-      !stralloc_copys(&h->session, "") || !stralloc_0(&h->session))
+      !stralloc_copys(&h->session, "") || !stralloc_0(&h->session) ||
+      !stralloc_copys(&h->auth, "") || !stralloc_0(&h->auth))
     return -1;
 
   r = http_getline(h, &line);
@@ -69,6 +70,9 @@ http_response(struct http *h, int fd)
       scan_ulong(value(line.s), &h->retry);  /* an HTTP date: ignored */
     } else if (str_casestart(line.s, "location:")) {
       if (!stralloc_copys(&h->loc, value(line.s)) || !stralloc_0(&h->loc))
+        { r = -1; goto out; }
+    } else if (str_casestart(line.s, "www-authenticate:")) {
+      if (!stralloc_copys(&h->auth, value(line.s)) || !stralloc_0(&h->auth))
         { r = -1; goto out; }
     } else if (str_casestart(line.s, "mcp-session-id:")) {
       if (!stralloc_copys(&h->session, value(line.s)) ||
