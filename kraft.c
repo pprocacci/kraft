@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "alloc.h"
 #include "anth.h"
 #include "api.h"
 #include "buffer.h"
@@ -811,14 +812,16 @@ lines(const char *p, const char *s, size_t n, unsigned long max)
 
 /* "* name(what)": a one-line description of a tool call */
 static void
-announce(const struct block *b, const char *in, size_t n)
+announce(const char *prefix, const struct block *b, const char *in, size_t n)
 {
-  static const char *keys[] = { "command", "path", "pattern", "url", 0 };
+  static const char *keys[] = {
+    "command", "path", "pattern", "url", "description", 0
+  };
   unsigned long u;
   size_t i, k;
 
   nl();
-  outs("* ");
+  outs(prefix);
   out(b->name.s, b->name.len);
   outs("(");
   for (i = 0; keys[i]; ++i)
@@ -956,9 +959,11 @@ check(const struct tool *t, const char *in, size_t n)
 static int
 approve(const struct tool *t, const char *in, size_t n)
 {
-  size_t i = (size_t)(t - tools);
+  size_t i;
   int c, r;
 
+  /* by name: t may be from a sub-agent's list */
+  for (i = 0; tools[i].name && str_diff(tools[i].name, t->name); ++i) ;
   if (!t->ask || mode == MODE_YES || allowed[i]) return 1;
   if (mode == MODE_RULES || mode == MODE_AUTO) {
     r = perm_auto(t->name, in, n, &rwhy);
@@ -1019,14 +1024,16 @@ approve(const struct tool *t, const char *in, size_t n)
 }
 
 /*
- * runs the tool calls in the last assistant message and puts their
- * results in a new user message.  if cut is set the reply was
- * truncated, so the calls are answered with errors instead.  every
- * call gets a result, even after an interrupt, as the APIs require.
- * returns 0 if the user interrupted.
+ * runs the tool calls in conversation c's last assistant message,
+ * from tool list tl, and puts their results in a new user message.
+ * if cut is set the reply was truncated, so the calls are answered
+ * with errors instead.  every call gets a result, even after an
+ * interrupt, as the APIs require.  sub is set for a sub-agent, whose
+ * calls are shown indented and without their results.  returns 0 if
+ * the user interrupted.
  */
 static int
-runtools(int cut)
+runtools(struct conv *c, const struct tool *tl, int cut, int sub)
 {
   const struct tool *t;
   struct msg *u, *a;
@@ -1034,8 +1041,8 @@ runtools(int cut)
   const char *in;
   size_t i, n;
 
-  if (!(u = conv_msg(&conv, ROLE_USER))) nomem();
-  a = &conv.m[conv.n - 2];
+  if (!(u = conv_msg(c, ROLE_USER))) nomem();
+  a = &c->m[c->n - 2];
   for (i = 0; i < a->n; ++i) {
     b = &a->b[i];
     if (b->type != BLK_TOOL) continue;
@@ -1043,7 +1050,7 @@ runtools(int cut)
     if (!stralloc_copyb(&res->id, b->id.s, b->id.len)) nomem();
     in = b->text.len ? b->text.s : "{}";
     n = b->text.len ? b->text.len : 2;
-    for (t = tools; t->name; ++t)
+    for (t = tl; t->name; ++t)
       if (str_len(t->name) == b->name.len &&
           !byte_diff(t->name, b->name.len, b->name.s))
         break;
@@ -1053,7 +1060,7 @@ runtools(int cut)
       stralloc_copys(&res->text, "not run: the user interrupted");
       continue;
     }
-    announce(b, in, n);
+    announce(sub ? "  > " : "* ", b, in, n);
     if (cut)
       stralloc_copys(&res->text, "not run: the reply was cut off before "
           "this call was complete");
@@ -1071,14 +1078,109 @@ runtools(int cut)
         res->iserr = 1;
       }
     }
-    pending += res->text.len + 100;  /* and the result's framing */
-    lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len,
-        !res->iserr && !str_diff(t->name ? t->name : "", "todo") ? 100 : 4);
+    if (c == &conv) pending += res->text.len + 100;  /* and its framing */
+    if (!sub)
+      lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len,
+          !res->iserr && !str_diff(t->name ? t->name : "", "todo") ? 100 :
+          !res->iserr && !str_diff(t->name ? t->name : "", "task") ? 8 : 4);
+    else if (res->iserr)
+      lines("    ! ", res->text.s, res->text.len, 1);
     flush();
   }
-  if (intr) warn("interrupted", 0, 0);
+  if (intr && !sub) warn("interrupted", 0, 0);
   return !intr;
 }
+
+/*
+ * Sub-agents.  The task tool hands a brief to a fresh conversation
+ * with the same model and nearly the same tools; it works through it
+ * and only its final report comes back, so what it read does not
+ * fill the main conversation.
+ */
+
+#define SUBSTEPS 40
+
+static struct tool subtools[40];  /* tools, less task, ask_user and todo */
+static stralloc subsys;
+
+static int
+subloop(struct conv *c)
+{
+  struct msg *m;
+  int step, r;
+
+  for (step = 0; step < SUBSTEPS; ++step) {
+    r = exchange(c, subsys.s, subtools, model, max, 0);
+    if (r <= 0) return r;
+    m = &c->m[c->n - 1];
+    if (reply.stop == STOP_PAUSE && !hastools(m)) continue;
+    if (!hastools(m)) return 1;
+    if (!runtools(c, subtools, reply.stop == STOP_MAX, 1)) return -1;
+    if (reply.stop == STOP_MAX) return 1;
+  }
+  return 1;  /* out of steps: report what there is */
+}
+
+/* task: description, prompt */
+static int
+subagent(const char *in, size_t n, stralloc *out)
+{
+  static int depth;
+  struct conv sc = { 0, 0, 0 };
+  struct msg *m;
+  struct block *b;
+  size_t i;
+  int r, ok = 0;
+
+  if (depth) {
+    stralloc_copys(out, "a sub-agent cannot start sub-agents");
+    return 0;
+  }
+  if (!(m = conv_msg(&sc, ROLE_USER)) || !(b = conv_block(m, BLK_TEXT)))
+    nomem();
+  if (!tool_arg(in, n, "prompt", &b->text) || !b->text.len) {
+    stralloc_copys(out, "prompt is required");
+    goto out;
+  }
+  ++depth;
+  r = subloop(&sc);
+  --depth;
+  if (r < 0) { stralloc_copys(out, "the sub-agent was interrupted"); goto out; }
+  if (!r) { stralloc_copys(out, "the sub-agent failed; see above"); goto out; }
+
+  /* its report: the text of its last reply */
+  stralloc_copys(out, "");
+  m = &sc.m[sc.n - 1];
+  for (i = 0; m->role == ROLE_ASSISTANT && i < m->n; ++i)
+    if (m->b[i].type == BLK_TEXT) {
+      if (out->len) stralloc_cats(out, "\n\n");
+      stralloc_cat(out, &m->b[i].text);
+    }
+  if (!out->len) stralloc_copys(out, "the sub-agent finished without a report");
+  ok = 1;
+out:
+  while (sc.n) conv_drop(&sc);
+  alloc_free(sc.m);
+  return ok;
+}
+
+static const struct tool tasktool = {
+  "task",
+  "Hand a self-contained piece of work to a sub-agent: a separate "
+  "conversation with the same tools (but no sub-agents of its own, and "
+  "no way to ask the user), which works on it and returns only its "
+  "final report. Use it for wide searches or research that would "
+  "otherwise fill this conversation with file contents, or for an "
+  "independent piece of a larger job. It sees nothing of this "
+  "conversation, so give it a complete brief, and say what the report "
+  "should contain.",
+  "{\"type\":\"object\",\"properties\":{"
+  "\"description\":{\"type\":\"string\","
+  "\"description\":\"A few words saying what it is for\"},"
+  "\"prompt\":{\"type\":\"string\",\"description\":\"The full brief\"}},"
+  "\"required\":[\"description\",\"prompt\"]}",
+  0, subagent, 0
+};
 
 /* tells the model, in the user's next turn, that it was cut short */
 static void
@@ -1140,7 +1242,7 @@ work(const char *s, size_t n)
       return;
     }
     stop = reply.stop;  /* the auto-mode check reuses reply */
-    if (!runtools(stop == STOP_MAX)) { interrupted(); return; }
+    if (!runtools(&conv, tools, stop == STOP_MAX, 0)) { interrupted(); return; }
     save();
     if (stop == STOP_MAX) {
       warn("the reply was cut off at max_tokens; raise it with -n", 0, 0);
@@ -1316,8 +1418,9 @@ main(int argc, char **argv)
   forget("OPENAI_API_KEY");
   mksystem();
   /* the tools for the whole session: changing them would spoil the cache */
-  for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 2; ++i)
+  for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 3; ++i)
     tools[i] = tool_all[i];
+  tools[i++] = tasktool;
   if (websearch) {
     if (api->render == anth_render && !str_diff(url.host.s, "api.anthropic.com"))
       tools[i++] = searchtool;
@@ -1325,6 +1428,22 @@ main(int argc, char **argv)
       warn("-w needs the Anthropic API at api.anthropic.com; ignored", 0, 0);
   }
   tools[i].name = 0;
+  /* a sub-agent's: no sub-agents of its own, no user to ask, no checklist */
+  for (i = r = 0; tools[i].name; ++i)
+    if (str_diff(tools[i].name, "task") && str_diff(tools[i].name, "ask_user") &&
+        str_diff(tools[i].name, "todo"))
+      subtools[r++] = tools[i];
+  subtools[r].name = 0;
+  if (!stralloc_copy(&subsys, &sys)) nomem();
+  subsys.len = str_len(subsys.s);
+  if (!stralloc_cats(&subsys, "\n\nYou are working as a sub-agent: the main "
+      "agent has given you one task. Work on it with the tools, then reply "
+      "with a concise but complete report of what you found or did. The "
+      "report is all the main agent will see, so include the file names, "
+      "line numbers and facts it will need. You cannot ask the user "
+      "anything; if the brief is unclear, make sensible assumptions and "
+      "say what they were.") || !stralloc_0(&subsys))
+    nomem();
   if (!ctxwin) findwindow();
   if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||
       !stralloc_0(&cwdsa))
