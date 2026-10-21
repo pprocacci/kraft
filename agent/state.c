@@ -16,6 +16,10 @@ const struct api *api;
 const char *model, *base;
 
 const char *checkmodel;
+const char *effort;     /* asked of the model: low ... max, or 0 */
+const char *effortnow;  /* for the request under way, in place of effort */
+const char *effort;     /* asked of the model: low ... max, or 0 */
+const char *effortnow;  /* for the request under way, in place of effort */
 
   /* for the auto-mode check */
 unsigned long max = 16384;

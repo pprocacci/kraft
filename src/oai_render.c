@@ -35,6 +35,12 @@ oai_render(stralloc *o, const struct req *q)
   C(stralloc_catulong(o, q->max));
   C(stralloc_cats(o, ",\"stream\":true,"
       "\"stream_options\":{\"include_usage\":true}"));
+  if (q->effort) {
+    /* the usual values here are low, medium and high */
+    C(stralloc_cats(o, ",\"reasoning_effort\":"));
+    C(stralloc_cats(o, !str_diff(q->effort, "low") ? "\"low\"" :
+        !str_diff(q->effort, "medium") ? "\"medium\"" : "\"high\""));
+  }
   if (q->tools && q->tools->name) {
     C(stralloc_cats(o, ",\"tools\":["));
     firstt = 1;

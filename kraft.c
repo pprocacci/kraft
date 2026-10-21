@@ -181,6 +181,8 @@ help(void)
   outs("Type a task and press return. Commands:\n"
       "  /clear    forget the conversation\n"
       "  /compact  replace the conversation with a summary, to save space\n"
+      "  /effort   show or set how hard the model thinks: low, medium,\n"
+      "            high, xhigh, max, or default\n"
       "  /mode     show or set when edits and commands need approval:\n"
       "              /mode ask    always ask\n"
       "              /mode rules  ask unless fixed safety rules allow it\n"
@@ -251,6 +253,9 @@ statusline(void)
 
   if (!stralloc_copys(&s, " ") || !stralloc_cats(&s, model) ||
       !stralloc_cats(&s, " \302\267 ") || !stralloc_cats(&s, modes[mode]))
+    nomem();
+  if (effort && (!stralloc_cats(&s, " \302\267 effort ") ||
+      !stralloc_cats(&s, effort)))
     nomem();
   if (ctxwin) {
     if (!stralloc_cats(&s, " \302\267 context ") ||
@@ -373,10 +378,13 @@ main(int argc, char **argv)
   checkmodel = env("KRAFT_CHECK_MODEL", checkmodel);
   if (!pickmode(env("KRAFT_MODE", modes[mode])))
     strerr_die(100, FATAL, "KRAFT_MODE must be ask, rules, auto or yes", 0);
+  if ((key = env("KRAFT_EFFORT", 0)) && !pickeffort(key))
+    strerr_die(100, FATAL, "KRAFT_EFFORT must be low, medium, high, xhigh, "
+        "max or default", 0);
   if ((key = env("KRAFT_CONTEXT", 0)) &&
       (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
     strerr_die(100, FATAL, "KRAFT_CONTEXT must be a number of tokens", 0);
-  while ((opt = getopt(argc, argv, "a:c:m:n:P:rtu:wy")) != -1)
+  while ((opt = getopt(argc, argv, "a:c:e:m:n:P:rtu:wy")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
     case 'c':
@@ -384,6 +392,7 @@ main(int argc, char **argv)
           !ctxwin)
         strerr_die(100, USAGE, 0, 0);
       break;
+    case 'e': if (!pickeffort(optarg)) strerr_die(100, USAGE, 0, 0); break;
     case 'm': model = optarg; break;
     case 'n':
       if (!*optarg || scan_ulong(optarg, &max) != str_len(optarg) || !max)
@@ -526,6 +535,16 @@ main(int argc, char **argv)
       continue;
     }
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
+    if (!str_diff(line.s, "/effort") || str_start(line.s, "/effort ")) {
+      if (line.s[7] && !pickeffort(line.s + 8))
+        outs("(effort is low, medium, high, xhigh, max or default)\n");
+      else {
+        outs("(effort: ");
+        outs(effort ? effort : "the server's default");
+        outs(")\n");
+      }
+      continue;
+    }
     if (!str_diff(line.s, "/usage")) { showusage(); continue; }
     if (!str_diff(line.s, "/rules")) { showrules(); continue; }
     if (!str_diff(line.s, "/diff")) { showdiff(); continue; }

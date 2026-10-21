@@ -114,6 +114,9 @@ attempt(struct conv *c, const char *sysp, const struct tool *tools,
   q.system = sysp;
   q.tools = tools;
   q.conv = c;
+  q.effort = effortnow ? effortnow : effort;
+  /* -t on the Anthropic API: ask for reasoning there is something to show of */
+  q.summarize = showthink && pdfok && show;
   if (!api->render(&body, &q)) nomem();
   if (intr) return -1;
 

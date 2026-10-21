@@ -44,6 +44,10 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
   else if (!str_diff(k, "url")) base = sdup(v);
   else if (!str_diff(k, "model")) model = sdup(v);
   else if (!str_diff(k, "check_model")) checkmodel = sdup(v);
+  else if (!str_diff(k, "effort")) {
+    if (!pickeffort(v))
+      kwarn(tmp.s, "effort must be low, medium, high, xhigh, max or default", 0);
+  }
   else if (!str_diff(k, "mode")) {
     if (!pickmode(v)) kwarn(tmp.s, "mode must be ask, rules, auto or yes", 0);
   } else if (!str_diff(k, "max_tokens") || !str_diff(k, "context")) {

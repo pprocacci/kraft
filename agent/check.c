@@ -54,7 +54,9 @@ check(const struct tool *t, const char *in, size_t n)
   sgr(0);
   outs("\n");
   flush();
+  effortnow = "low";  /* a short judgement needs little thought */
   r = exchange(&cconv, checksys, notools, checkmodel, 4096, 0);
+  effortnow = 0;
   if (!stralloc_copys(&cwhy, "")) nomem();
   if (r > 0) {
     m = &cconv.m[cconv.n - 1];

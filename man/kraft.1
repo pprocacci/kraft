@@ -9,6 +9,7 @@
 .Op Fl rtwy
 .Op Fl a Ar api
 .Op Fl c Ar tokens
+.Op Fl e Ar effort
 .Op Fl m Ar model
 .Op Fl n Ar max_tokens
 .Op Fl P Ar mode
@@ -92,6 +93,28 @@ reports it, and so does LM Studio.
 If neither answers,
 .Nm
 compacts only when a request is refused as too long.
+.It Fl e Ar effort
+How much effort the model should put into each reply:
+.Cm low ,
+.Cm medium ,
+.Cm high ,
+.Cm xhigh
+or
+.Cm max ;
+more effort means more thinking, and more tokens.
+With the Anthropic API it is sent as
+.Ql output_config.effort ;
+with an OpenAI-compatible one as
+.Ql reasoning_effort ,
+where
+.Cm xhigh
+and
+.Cm max
+become
+.Cm high .
+By default the server decides.
+The auto-mode check always asks for
+.Cm low .
 .It Fl m Ar model
 The model to use.
 .It Fl n Ar max_tokens
@@ -105,6 +128,8 @@ Every session is saved as it goes; see
 .It Fl t
 Copy the model's reasoning, when the server sends it, to standard
 error.
+With the Anthropic API, a summary of the reasoning is asked for,
+since the reasoning itself is not sent.
 .It Fl u Ar url
 The base URL of the server, with or without a trailing
 .Pa /v1 .
@@ -254,6 +279,7 @@ The settings are
 .Cm url ,
 .Cm model ,
 .Cm check_model ,
+.Cm effort ,
 .Cm mode ,
 .Cm max_tokens ,
 .Cm context ,
@@ -411,6 +437,14 @@ mode.
 Show the tokens used this session: input, how much of it was read
 from or written to the prompt cache, output, and roughly how full
 the context window is.
+.It Cm /effort Op Ar effort
+Show or change the effort, as for
+.Fl e ,
+or
+.Cm default
+to leave it to the server.
+With the Anthropic API a change makes the next request rebuild the
+prompt cache.
 .It Cm /mode Op Cm ask | rules | auto | yes
 Show or change the permission mode.
 The prompt shows it:
@@ -438,6 +472,9 @@ Default for
 .It Ev KRAFT_MODEL
 Default for
 .Fl m .
+.It Ev KRAFT_EFFORT
+Default for
+.Fl e .
 .It Ev KRAFT_CONTEXT
 Default for
 .Fl c .

@@ -26,6 +26,8 @@ struct req {
   const char *system;
   const struct tool *tools;  /* ends with a null name */
   const struct conv *conv;
+  const char *effort;        /* low ... max, or 0 for the server's default */
+  int summarize;             /* ask for summarized reasoning (Anthropic) */
 };
 
 /* token counts for one request, as the server reports them */

@@ -52,7 +52,7 @@
 #endif
 #define FATAL "kraft: fatal: "
 #define USAGE "kraft: usage: kraft [-rtwy] [-a anthropic|openai] [-c tokens] " \
-    "[-m model] " \
+    "[-e effort] [-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
 #define CONNECTSECS 15  /* to give up connecting to the server */
@@ -100,6 +100,8 @@ extern const struct api apis[2];  /* anthropic, openai */
 extern const struct api *api;
 extern const char *model, *base;
 extern const char *checkmodel;
+extern const char *effort, *effortnow;
+extern const char *effort, *effortnow;
 extern unsigned long max;
 extern int showthink, mode, status;
 extern volatile sig_atomic_t intr;
@@ -179,6 +181,8 @@ void nomem(void) __dead2;
 void out(const char *s, size_t n);
 void outs(const char *s);
 int pickmode(const char *s);
+int pickeffort(const char *s);
+int pickeffort(const char *s);
 int plain(const char *s);
 void raw(const char *s, size_t n);
 void relpath(const char *p, stralloc *out);

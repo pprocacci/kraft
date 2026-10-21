@@ -124,6 +124,14 @@ anth_render(stralloc *o, const struct req *q)
   C(stralloc_cats(o, ",\"max_tokens\":"));
   C(stralloc_catulong(o, q->max));
   C(stralloc_cats(o, ",\"stream\":true,\"cache_control\":{\"type\":\"ephemeral\"}"));
+  if (q->effort) {
+    C(stralloc_cats(o, ",\"output_config\":{\"effort\":"));
+    C(json_str(o, q->effort, str_len(q->effort)));
+    C(stralloc_cats(o, "}"));
+  }
+  if (q->summarize)
+    C(stralloc_cats(o, ",\"thinking\":{\"type\":\"adaptive\","
+        "\"display\":\"summarized\"}"));
   if (q->system) {
     C(stralloc_cats(o, ",\"system\":[{\"type\":\"text\",\"text\":"));
     C(json_str(o, q->system, str_len(q->system)));
