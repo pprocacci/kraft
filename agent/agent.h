@@ -49,6 +49,14 @@
 #include "url.h"
 #ifndef KRAFT_VERSION
 #define KRAFT_VERSION "unknown"
+char **options(int argc, char **argv, int *resumeit);
+void setconnection(void);
+void settools(void);
+int command(const char *line);
+void repl(void);
+void findwindow(void);
+void newsession(void);
+
 #endif
 #define FATAL "kraft: fatal: "
 #define USAGE "kraft: usage: kraft [-rtwy] [-a anthropic|openai] [-c tokens] " \
@@ -204,5 +212,13 @@ void task(const char *s, size_t n);
 void trust(const char *fn, const char *hash);
 int undo(void);
 void work(const char *s, size_t n);
+
+char **options(int argc, char **argv, int *resumeit);
+void setconnection(void);
+void settools(void);
+int command(const char *line);
+void repl(void);
+void findwindow(void);
+void newsession(void);
 
 #endif
