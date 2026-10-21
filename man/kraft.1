@@ -84,7 +84,7 @@ to allow the call,
 to refuse it, or
 .Cm a
 to allow that tool for the rest of the session.
-.It Cm auto
+.It Cm rules
 Calls that a fixed, conservative set of rules finds safe are allowed
 without asking; you are asked about the rest, with the reason.
 A file may be written or edited if it is inside the current
@@ -103,14 +103,47 @@ and
 or a program in the current directory, and it uses no command or
 process substitution, here-document, or redirection other than to
 .Pa /dev/null .
-Commands such as
+Anything else, such as
 .Cm rm ,
-.Cm git push ,
 .Cm make install ,
 .Cm sed -i
+or
+.Cm find -delete ,
+is asked about.
+.It Cm auto
+As
+.Cm rules ,
+but when the rules cannot settle a call, the model is asked, in a
+separate request with no tools, whether the call is safe and part
+of what you asked for.
+It sees your recent requests and the call, but no tool output, so
+text in the files it read cannot argue for the call.
+If it answers
+.Cm ALLOW ,
+the call runs and its reason is shown; otherwise you are asked.
+.Pp
+Some calls are always put to you, whatever the model says: running
+anything as another user
+.Pf ( Cm sudo ,
+.Cm doas ,
+.Cm su ) ,
+.Cm rm
+with
+.Fl r
+or
+.Fl f ,
+.Cm git push
 and
-.Cm find -delete
-are always asked about.
+.Cm git clean ,
+recursive
+.Cm chmod
+and
+.Cm chown ,
+piping into a shell,
+.Cm dd ,
+.Cm newfs
+and the like, and writing outside the current directory or in
+.Pa .git .
 .It Cm yes
 Every call is allowed without asking.
 Use this only where the model can do no harm, such as a scratch jail.
@@ -146,7 +179,7 @@ At the prompt:
 .Bl -tag -width "/clear"
 .It Cm /clear
 Forget the conversation.
-.It Cm /mode Op Cm ask | auto | yes
+.It Cm /mode Op Cm ask | rules | auto | yes
 Show or change the permission mode.
 The prompt shows it:
 .Sq auto>\ \&
@@ -176,6 +209,11 @@ Default for
 .It Ev KRAFT_MODE
 Default for
 .Fl P .
+.It Ev KRAFT_CHECK_MODEL
+The model for the
+.Cm auto
+mode check; by default the main model.
+It must be served by the same server, at the same URL.
 .It Ev KRAFT_URL
 Default for
 .Fl u .
@@ -218,10 +256,17 @@ kraft -u https://api.anthropic.com -m claude-opus-5 \e
 .Sh BUGS
 The conversation is not saved between runs.
 .Pp
+In
+.Cm auto
+mode each call the rules cannot settle costs one extra request, and
+a small model's judgement can be erratic; it errs towards asking.
+.Pp
 The auto-mode rules judge commands by their text alone; a program
 on the list can still be made to do harm through a project's own
 files, such as a hostile
 .Pa Makefile .
 Use
+.Cm rules
+and
 .Cm auto
 on code you trust.
