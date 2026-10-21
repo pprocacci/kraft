@@ -16,6 +16,7 @@ struct http {
   int started;             /* at least one chunk read */
   int eof;                 /* body fully read */
   unsigned long left;      /* bytes left in chunk or body */
+  unsigned long retry;     /* Retry-After in seconds, or 0 */
   stralloc loc;            /* Location, NUL-terminated, or empty */
   stralloc ctype;          /* Content-Type, NUL-terminated, or empty */
 };

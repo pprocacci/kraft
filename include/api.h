@@ -42,6 +42,7 @@ struct reply {
   stralloc think;  /* reasoning */
   stralloc err;    /* error message */
   int stop;
+  int retry;       /* the error is temporary: the request may be tried again */
   struct usage u;  /* filled in as the stream reports it */
 };
 

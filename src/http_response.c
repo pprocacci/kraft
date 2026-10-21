@@ -41,6 +41,7 @@ http_response(struct http *h, int fd)
   h->started = 0;
   h->eof = 0;
   h->left = 0;
+  h->retry = 0;
   if (!stralloc_copys(&h->loc, "") || !stralloc_0(&h->loc) ||
       !stralloc_copys(&h->ctype, "") || !stralloc_0(&h->ctype))
     return -1;
@@ -63,6 +64,8 @@ http_response(struct http *h, int fd)
     } else if (str_casestart(line.s, "content-length:")) {
       if (!scan_ulong(value(line.s), &h->left)) { r = 0; goto out; }
       h->haslen = 1;
+    } else if (str_casestart(line.s, "retry-after:")) {
+      scan_ulong(value(line.s), &h->retry);  /* an HTTP date: ignored */
     } else if (str_casestart(line.s, "location:")) {
       if (!stralloc_copys(&h->loc, value(line.s)) || !stralloc_0(&h->loc))
         { r = -1; goto out; }

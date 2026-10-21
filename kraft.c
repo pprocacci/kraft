@@ -99,6 +99,8 @@ static unsigned long requests;
 static unsigned long ctxwin;   /* the model's context window, or 0 if unknown */
 static unsigned long pending;  /* bytes added to the conversation since lastmain */
 static int overflow;           /* the last request was refused as too long */
+static int again;              /* the last try failed, but may work again */
+static unsigned long waitsecs;  /* how long the server asked us to wait */
 static stralloc pfx, ghdrs;    /* the URL path before /v1, headers for GETs */
 
 /* adds the last request's usage to the session's */
@@ -466,7 +468,7 @@ spin(int fd)
  * kept and -1 is returned.
  */
 static int
-exchange(struct conv *c, const char *sysp, const struct tool *tools,
+attempt(struct conv *c, const char *sysp, const struct tool *tools,
     const char *mdl, unsigned long mx, int show)
 {
   struct req q;
@@ -486,6 +488,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   if (fd == -1) {
     if (intr) return -1;
     warnsys("unable to connect to ", base);
+    again = 1;
     goto fail;
   }
   if (url.tls && (fd = tls_connect(fd, url.host.s, &tlswhy)) == -1) {
@@ -504,6 +507,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   if (!http_request(fd, "POST", host.s, path.s, hdrs.s, body.s, body.len)) {
     if (intr) goto stopped;
     warnsys("unable to send request to ", base);
+    again = 1;
     goto failfd;
   }
   clock_gettime(CLOCK_MONOTONIC, &asked);
@@ -513,6 +517,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     if (intr) goto stopped;
     if (r < 0) warnsys("unable to read response from ", base);
     else warn("malformed response from ", base, 0);
+    again = 1;
     goto failfd;
   }
   if (http.status != 200) {
@@ -530,6 +535,11 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     }
     warn("HTTP ", tmp.s, body.s);
     status = http.status < 500 ? 100 : 111;
+    if (http.status == 429 || http.status == 500 || http.status == 502 ||
+        http.status == 503 || http.status == 504 || http.status == 529) {
+      again = 1;  /* busy or broken for now; try again later */
+      waitsecs = http.retry;
+    }
     return 0;
   }
 
@@ -537,6 +547,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   sse.p = sse.n = 0;
   sse.eof = 0;
   reply.stop = STOP_NONE;
+  reply.retry = 0;
   reply.u = nousage;
   for (;;) {
     /* nothing to show yet: say so while waiting */
@@ -547,6 +558,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     if (r < 0) {
       if (intr) goto cut;
       warnsys("unable to read stream from ", base);
+      again = 1;
       goto drop;
     }
     if (r == 0) {
@@ -580,6 +592,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     if (r == API_ERROR) {
       if (!stralloc_0(&reply.err)) nomem();
       warn("API error: ", reply.err.s, 0);
+      again = reply.retry;
       goto drop;
     }
     if (r == API_DONE) break;
@@ -604,6 +617,7 @@ stopped:
   warn("interrupted", 0, 0);
   return -1;
 drop:
+  if (show) mdreset();
   conv_drop(c);
 failfd:
   curfd = -1;
@@ -611,6 +625,60 @@ failfd:
 fail:
   status = 111;
   return 0;
+}
+
+#define RETRIES 5  /* more tries for a request that failed for now */
+
+/* waits secs seconds, or until ^C; 0 if interrupted */
+static int
+pause_for(unsigned long secs)
+{
+  unsigned long ms;
+
+  for (ms = 0; ms < secs * 1000 && !intr; ms += 100)
+    poll(0, 0, 100);
+  return !intr;
+}
+
+/*
+ * sends conversation c, with system prompt sysp and tools, to model
+ * mdl, and streams the reply into a new assistant message, printing
+ * it as it arrives if show is set.  returns 1 on success.  on failure
+ * the partial reply is dropped, so the conversation stays valid, and
+ * 0 is returned.  if the user interrupts, whatever text arrived is
+ * kept and -1 is returned.  a failure that may pass (no connection,
+ * an overloaded or broken server, a stream cut short) is tried again
+ * up to RETRIES times, waiting 2, 4, 8... seconds, or as long as the
+ * server asks.
+ */
+static int
+exchange(struct conv *c, const char *sysp, const struct tool *tools,
+    const char *mdl, unsigned long mx, int show)
+{
+  unsigned long secs;
+  int n, r;
+
+  for (n = 0;; ++n) {
+    again = 0;
+    waitsecs = 0;
+    r = attempt(c, sysp, tools, mdl, mx, show);
+    if (r || !again || n == RETRIES) return r;
+    secs = waitsecs ? waitsecs : 2UL << n;
+    if (secs > 120) secs = 120;
+    if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, secs) ||
+        !stralloc_cats(&tmp, "s (try ") ||
+        !stralloc_catulong(&tmp, (unsigned long)n + 2) ||
+        !stralloc_cats(&tmp, " of ") ||
+        !stralloc_catulong(&tmp, RETRIES + 1) || !stralloc_cats(&tmp, ")") ||
+        !stralloc_0(&tmp))
+      nomem();
+    warn("trying again in ", tmp.s, 0);
+    if (!pause_for(secs)) {
+      warn("interrupted", 0, 0);
+      return -1;
+    }
+    status = 0;
+  }
 }
 
 /* fetches p from the server into out; 1 if it answered 200 */

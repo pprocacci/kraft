@@ -92,6 +92,11 @@ oai_event(struct msg *m, const char *d, size_t n, struct reply *r)
   if (json_get(d, n, "error", &v, &vn)) {
     if (str(d, n, "error.message", &r->err) <= 0)
       stralloc_cats(&r->err, "the server reported an error");
+    if ((json_get(d, n, "error.type", &v, &vn) &&
+        (json_is(v, vn, "server_error") || json_is(v, vn, "rate_limit_error")))
+        || (json_get(d, n, "error.code", &v, &vn) &&
+        json_is(v, vn, "rate_limit_exceeded")))
+      r->retry = 1;
     return API_ERROR;
   }
   if (json_get(d, n, "usage", &v, &vn) && *v == '{') {
