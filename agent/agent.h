@@ -51,7 +51,7 @@
 #define KRAFT_VERSION "unknown"
 #endif
 #define FATAL "kraft: fatal: "
-#define USAGE "kraft: usage: kraft [-rtwy] [-a anthropic|openai] [-c tokens] " \
+#define USAGE "kraft: usage: kraft [-jprtwy] [-a anthropic|openai] [-c tokens] " \
     "[-e effort] [-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
@@ -102,7 +102,7 @@ extern const char *model, *base;
 extern const char *checkmodel;
 extern const char *effort, *effortnow;
 extern unsigned long long cost;
-extern int costgap, ctxset;
+extern int costgap, ctxset, script;
 extern unsigned long max;
 extern int showthink, mode, status;
 extern volatile sig_atomic_t intr;
@@ -218,5 +218,6 @@ int custom(const char *line);
 void customs(void);
 int price(const char *m, const struct usage *u, unsigned long long *cost);
 void catcost(stralloc *s);
+void scriptout(int json);
 
 #endif

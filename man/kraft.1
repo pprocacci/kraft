@@ -6,7 +6,7 @@
 .Nd coding agent
 .Sh SYNOPSIS
 .Nm
-.Op Fl rtwy
+.Op Fl jprtwy
 .Op Fl a Ar api
 .Op Fl c Ar tokens
 .Op Fl e Ar effort
@@ -136,6 +136,29 @@ The base URL of the server, with or without a trailing
 Both http and https are supported.
 The default is
 .Pa http://127.0.0.1:1234 .
+.It Fl j
+As
+.Fl p ,
+but what goes to standard output is a JSON object:
+.Bd -literal -offset indent
+{"result": "the final reply", "error": false, "status": 0,
+ "model": "...", "requests": 3, "input_tokens": 12,
+ "cache_read_tokens": 9000, "cache_write_tokens": 400,
+ "output_tokens": 250, "cost_usd": 0.0123,
+ "session": "/home/you/.kraft/sessions/..."}
+.Ed
+.Pp
+.Ql cost_usd
+is
+.Ql null
+when it cannot be known.
+.It Fl p
+For scripts: carry out the task given as arguments, or else all of
+standard input as one task, then exit.
+Only the final reply goes to standard output; tool calls, diffs and
+the like go to standard error, without colour.
+There being no terminal to ask on, calls that would need approval are
+refused unless the permission mode allows them.
 .It Fl P Ar mode
 When tool calls that change things need your approval; see
 .Sx PERMISSIONS .
@@ -578,7 +601,14 @@ adds to one.
 .Nm
 exits 0 on success, 100 on a permanent failure such as bad usage or
 a rejected request, 111 on a temporary failure such as a network
-error, and 130 if a task given on the command line was interrupted.
+error (after the retries), and 130 if a task given on the command
+line was interrupted.
+These are meant to be relied on by scripts.
+.Pp
+To have kraft do something unattended and report as JSON:
+.Bd -literal -offset indent
+kraft -j -P auto 'run the tests and fix any failures' > out.json
+.Ed
 .Sh EXAMPLES
 Work with a model served by LM Studio on another machine:
 .Bd -literal -offset indent

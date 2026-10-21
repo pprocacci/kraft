@@ -20,6 +20,7 @@ const char *effort;     /* asked of the model: low ... max, or 0 */
 const char *effortnow;  /* for the request under way, in place of effort */
 unsigned long long cost;  /* this session's, in 10^-8 dollars */
 int costgap;            /* some requests could not be priced */
+int script;             /* -p or -j: 1 for text, 2 for JSON */
 int ctxset;             /* the context window was given, not looked up */
 
   /* for the auto-mode check */

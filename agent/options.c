@@ -26,7 +26,7 @@ options(int argc, char **argv, int *resumeit)
       (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
     strerr_die(100, FATAL, "KRAFT_CONTEXT must be a number of tokens", 0);
   *resumeit = 0;
-  while ((opt = getopt(argc, argv, "a:c:e:m:n:P:rtu:wy")) != -1)
+  while ((opt = getopt(argc, argv, "a:c:e:jm:n:pP:rtu:wy")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
     case 'c':
@@ -40,6 +40,8 @@ options(int argc, char **argv, int *resumeit)
       if (!*optarg || scan_ulong(optarg, &max) != str_len(optarg) || !max)
         strerr_die(100, USAGE, 0, 0);
       break;
+    case 'j': script = 2; break;
+    case 'p': script = 1; break;
     case 'P': if (!pickmode(optarg)) strerr_die(100, USAGE, 0, 0); break;
     case 'r': *resumeit = 1; break;
     case 'w': websearch = 1; break;

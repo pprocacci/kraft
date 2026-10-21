@@ -17,6 +17,23 @@ onint(int sig)
   errno = e;
 }
 
+/* all of standard input, as one task */
+static void
+readall(stralloc *s)
+{
+  ssize_t r;
+
+  for (;;) {
+    if (!stralloc_readyplus(s, 8192)) nomem();
+    r = buffer_unixread(0, s->s + s->len, 8192);
+    if (r < 0) strerr_sys(111, FATAL, "unable to read standard input", 0);
+    if (r == 0) break;
+    s->len += (size_t)r;
+  }
+  while (s->len && (s->s[s->len - 1] == '\n' || s->s[s->len - 1] == ' '))
+    --s->len;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -35,6 +52,12 @@ main(int argc, char **argv)
   atexit(job_killall);  /* background commands do not outlive kraft */
 
   argv = options(argc, argv, &resumeit);
+  if (script) {
+    /* the outcome alone on stdout; the rest on stderr, plainly */
+    buffer_flush(buffer_1);
+    buffer_1->fd = 2;
+    color = 0;
+  }
   setconnection();
   mksystem();
   settools();
@@ -45,16 +68,20 @@ main(int argc, char **argv)
   if (resumeit && !resume()) outs("(no earlier session in this directory)\n");
   if (!sessfn.len) newsession();
 
-  /* a task on the command line: do it and exit */
-  if (*argv) {
+  /* a task on the command line, or with -p or -j on stdin: do it, exit */
+  if (*argv || script) {
     if (!stralloc_copys(&line, "")) nomem();
     for (; *argv; ++argv) {
       if (line.len && !stralloc_append(&line, ' ')) nomem();
       if (!stralloc_cats(&line, *argv)) nomem();
     }
+    if (!line.len) readall(&line);
+    if (!line.len) strerr_die(100, FATAL, "no task, on the command line or "
+        "standard input", 0);
     task(line.s, line.len);
     nl();
     flush();
+    if (script) scriptout(script == 2);
     return status;
   }
   repl();
