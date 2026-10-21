@@ -8,6 +8,7 @@
 .Nm
 .Op Fl ty
 .Op Fl a Ar api
+.Op Fl c Ar tokens
 .Op Fl m Ar model
 .Op Fl n Ar max_tokens
 .Op Fl P Ar mode
@@ -37,6 +38,16 @@ When standard input is not a terminal, each line is a task.
 The conversation is kept between tasks, so later tasks can refer to
 earlier ones.
 .Pp
+When the conversation grows to about three quarters of the model's
+context window,
+.Nm
+has the model summarize it, and carries on with the summary in its
+place.
+It does the same, once, if the server refuses a request as too long.
+With the Anthropic API, requests use prompt caching, so the
+unchanging start of each request is billed at a fraction of the
+usual price.
+.Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl a Ar api
@@ -48,6 +59,13 @@ the default) or
 .Cm openai
 (an OpenAI-compatible Chat Completions API,
 .Pa /v1/chat/completions ) .
+.It Fl c Ar tokens
+The size of the model's context window.
+By default it is asked of the server: the Anthropic Models API
+reports it, and so does LM Studio.
+If neither answers,
+.Nm
+compacts only when a request is refused as too long.
 .It Fl m Ar model
 The model to use.
 .It Fl n Ar max_tokens
@@ -176,9 +194,15 @@ List a directory.
 .El
 .Sh COMMANDS
 At the prompt:
-.Bl -tag -width "/clear"
+.Bl -tag -width "/compact"
 .It Cm /clear
 Forget the conversation.
+.It Cm /compact
+Replace the conversation with a summary of it, to save space.
+.It Cm /usage
+Show the tokens used this session: input, how much of it was read
+from or written to the prompt cache, output, and roughly how full
+the context window is.
 .It Cm /mode Op Cm ask | rules | auto | yes
 Show or change the permission mode.
 The prompt shows it:
@@ -206,6 +230,9 @@ Default for
 .It Ev KRAFT_MODEL
 Default for
 .Fl m .
+.It Ev KRAFT_CONTEXT
+Default for
+.Fl c .
 .It Ev KRAFT_MODE
 Default for
 .Fl P .

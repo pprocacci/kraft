@@ -15,6 +15,7 @@ int stralloc_ready(stralloc *, size_t);
 int stralloc_readyplus(stralloc *, size_t);
 int stralloc_copyb(stralloc *, const char *, size_t);
 int stralloc_copys(stralloc *, const char *);
+int stralloc_copy(stralloc *, const stralloc *);
 int stralloc_catb(stralloc *, const char *, size_t);
 int stralloc_cats(stralloc *, const char *);
 int stralloc_append(stralloc *, char);

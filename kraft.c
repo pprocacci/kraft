@@ -34,7 +34,8 @@
 #endif
 
 #define FATAL "kraft: fatal: "
-#define USAGE "kraft: usage: kraft [-ty] [-a anthropic|openai] [-m model] " \
+#define USAGE "kraft: usage: kraft [-ty] [-a anthropic|openai] [-c tokens] " \
+    "[-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
 
@@ -75,6 +76,10 @@ static const struct usage nousage;
 static struct usage total;     /* this session, all requests */
 static struct usage lastmain;  /* the last request of the main conversation */
 static unsigned long requests;
+static unsigned long ctxwin;   /* the model's context window, or 0 if unknown */
+static unsigned long pending;  /* bytes added to the conversation since lastmain */
+static int overflow;           /* the last request was refused as too long */
+static stralloc pfx, ghdrs;    /* the URL path before /v1, headers for GETs */
 
 /* adds the last request's usage to the session's */
 static void
@@ -85,7 +90,22 @@ tally(int ismain)
   total.cwrite += reply.u.cwrite;
   total.out += reply.u.out;
   ++requests;
-  if (ismain) lastmain = reply.u;
+  if (ismain) {
+    lastmain = reply.u;
+    pending = 0;
+  }
+}
+
+/*
+ * the conversation's size in tokens: what the server counted for the
+ * last request and its reply, plus a rough four bytes a token for
+ * what has been added since.
+ */
+static unsigned long
+estimate(void)
+{
+  return lastmain.in + lastmain.cread + lastmain.cwrite + lastmain.out +
+      pending / 4;
 }
 
 /*
@@ -104,6 +124,8 @@ onint(int sig)
   if (proc_pid > 0) kill(-proc_pid, intr > 1 ? SIGKILL : SIGINT);
   errno = e;
 }
+
+static void nomem(void) __dead2;
 
 static void
 nomem(void)
@@ -260,6 +282,22 @@ slurp(void)
   if (!stralloc_0(&body)) nomem();
 }
 
+/* does an error message say the prompt is too long for the model? */
+static int
+toolong(const char *s)
+{
+  static const char *const says[] = {
+    "too long", "too large", "context length", "context_length",
+    "context window", "maximum context", "exceeds the context", 0
+  };
+  size_t i;
+
+  for (; *s; ++s)
+    for (i = 0; says[i]; ++i)
+      if (str_casestart(s, says[i])) return 1;
+  return 0;
+}
+
 /*
  * after an interrupted reply, keeps only its text: a tool call or a
  * thinking block cut off part way would make the conversation invalid.
@@ -347,6 +385,10 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     curfd = -1;
     close(fd);
     if (intr) { warn("interrupted", 0, 0); return -1; }
+    if ((http.status == 400 || http.status == 413) && toolong(body.s)) {
+      overflow = 1;  /* the caller may compact and try again */
+      return 0;
+    }
     warn("HTTP ", tmp.s, body.s);
     status = http.status < 500 ? 100 : 111;
     return 0;
@@ -410,6 +452,135 @@ failfd:
 fail:
   status = 111;
   return 0;
+}
+
+/* fetches p from the server into out; 1 if it answered 200 */
+static int
+getjson(const char *p, stralloc *out)
+{
+  char buf[4096];
+  ssize_t n = -1;
+  int fd;
+
+  fd = tcp_connect(url.host.s, url.port.s);
+  if (fd == -1) return 0;
+  if (url.tls && (fd = tls_connect(fd, url.host.s)) == -1) return 0;
+  curfd = fd;
+  if (http_request(fd, "GET", host.s, p, ghdrs.s, 0, 0) &&
+      http_response(&http, fd) > 0 && http.status == 200) {
+    if (!stralloc_copys(out, "")) nomem();
+    while ((n = http_get(&http, buf, sizeof buf)) > 0)
+      if (out->len < 1048576 && !stralloc_catb(out, buf, (size_t)n)) nomem();
+  }
+  curfd = -1;
+  close(fd);
+  return n == 0;
+}
+
+/*
+ * asks the server for the model's context window: the Anthropic
+ * Models API's max_input_tokens, or LM Studio's loaded context.
+ * leaves ctxwin 0 if neither answers.
+ */
+static void
+findwindow(void)
+{
+  static const char *const where[][2] = {
+    { "/v1/models/", "max_input_tokens" },
+    { "/api/v0/models/", "loaded_context_length" },
+    { "/api/v0/models/", "max_context_length" },
+  };
+  stralloc p = STRALLOC_ZERO, j = STRALLOC_ZERO;
+  const char *v;
+  size_t i, vn;
+  unsigned long u;
+
+  for (i = 0; i < sizeof where / sizeof where[0] && !ctxwin && !intr; ++i) {
+    if (!stralloc_copy(&p, &pfx) || !stralloc_cats(&p, where[i][0]) ||
+        !stralloc_cats(&p, model) || !stralloc_0(&p))
+      nomem();
+    if (!getjson(p.s, &j)) continue;
+    if (json_get(j.s, j.len, where[i][1], &v, &vn) &&
+        scan_ulong(v, &u) == vn && u)
+      ctxwin = u;
+  }
+  stralloc_free(&p);
+  stralloc_free(&j);
+}
+
+/*
+ * replaces the conversation with a summary the model writes of it.
+ * the request has the same system prompt and tools as the rest, so
+ * most of it is read from the cache.  if carry is set a task is under
+ * way, and the model is told to carry on with it.  returns 1 if the
+ * conversation was compacted.
+ */
+static int
+compact(int carry)
+{
+  struct msg *m;
+  struct block *b;
+  stralloc sum = STRALLOC_ZERO;
+  size_t i;
+  int r;
+
+  nl();
+  outs("(compacting the conversation to save space...)\n");
+  flush();
+  if (!(m = conv_msg(&conv, ROLE_USER)) || !(b = conv_block(m, BLK_TEXT)))
+    nomem();
+  if (!stralloc_copys(&b->text, "[Stop here, and instead of carrying on, "
+      "write a summary of this whole conversation that will replace it. "
+      "Include: the user's requests, quoting the latest one exactly; what "
+      "has been done so far; the files read or changed, and the facts "
+      "about them that matter; errors met and how they were dealt with; "
+      "and exactly what remains to be done. Be complete but concise: the "
+      "summary is all that will be kept. Do not call any tools.]"))
+    nomem();
+  overflow = 0;
+  r = exchange(&conv, sys.s, tool_all, model, max, 0);
+  if (r > 0) {
+    m = &conv.m[conv.n - 1];
+    for (i = 0; i < m->n; ++i)
+      if (m->b[i].type == BLK_TEXT &&
+          !stralloc_catb(&sum, m->b[i].text.s, m->b[i].text.len))
+        nomem();
+  }
+  if (r <= 0 || !sum.len) {
+    /* take the request back out, so the conversation is as it was */
+    if (r > 0) conv_drop(&conv);
+    m = &conv.m[conv.n - 1];
+    if (m->role == ROLE_USER && m->n && m->b[m->n - 1].type == BLK_TEXT) {
+      stralloc_free(&m->b[m->n - 1].text);
+      if (!--m->n) conv_drop(&conv);
+    }
+    warn(overflow ? "the conversation is too long even to summarize; "
+        "/clear starts afresh" : "unable to compact the conversation", 0, 0);
+    overflow = 0;
+    stralloc_free(&sum);
+    return 0;
+  }
+
+  while (conv.n) conv_drop(&conv);
+  if (!(m = conv_msg(&conv, ROLE_USER)) || !(b = conv_block(m, BLK_TEXT)))
+    nomem();
+  if (!stralloc_copys(&b->text, "[The conversation so far was replaced by "
+      "this summary to save space.]\n\n") ||
+      !stralloc_catb(&b->text, sum.s, sum.len) ||
+      !stralloc_cats(&b->text, carry ? "\n\n[End of summary. Carry on "
+      "with the task from where it was left.]" : "\n\n[End of summary.]"))
+    nomem();
+  lastmain = nousage;
+  pending = b->text.len;
+  stralloc_free(&sum);
+  if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, estimate()) ||
+      !stralloc_0(&tmp))
+    nomem();
+  outs("(compacted to about ");
+  outs(tmp.s);
+  outs(" tokens)\n");
+  flush();
+  return 1;
 }
 
 static int
@@ -688,6 +859,7 @@ runtools(int cut)
         res->iserr = 1;
       }
     }
+    pending += res->text.len + 100;  /* and the result's framing */
     lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len, 4);
     flush();
   }
@@ -716,15 +888,31 @@ task(const char *s, size_t n)
 {
   struct msg *m;
   struct block *b;
-  int step, r, stop;
+  int step, r, stop, retried = 0;
 
   intr = 0;
   if (!(m = conv_msg(&conv, ROLE_USER))) nomem();
   if (!(b = conv_block(m, BLK_TEXT))) nomem();
   if (!stralloc_copyb(&b->text, s, n)) nomem();
+  pending += n;
 
   for (step = 0; step < MAXSTEPS; ++step) {
+    /* compact before the conversation outgrows three quarters of the window */
+    if (ctxwin && estimate() > ctxwin / 4 * 3 && !compact(1)) return;
     r = exchange(&conv, sys.s, tool_all, model, max, 1);
+    if (!r && overflow && !retried) {
+      /* the server says it is too long after all: compact, try again */
+      overflow = 0;
+      retried = 1;
+      if (!compact(1)) return;
+      r = exchange(&conv, sys.s, tool_all, model, max, 1);
+    }
+    if (!r && overflow) {
+      warn("the conversation is too long for the model; /clear starts "
+          "afresh", 0, 0);
+      overflow = 0;
+      status = 100;
+    }
     if (r < 0) { interrupted(); return; }
     if (!r) return;
     m = &conv.m[conv.n - 1];
@@ -748,16 +936,17 @@ static void
 help(void)
 {
   outs("Type a task and press return. Commands:\n"
-      "  /clear  forget the conversation\n"
-      "  /mode   show or set when edits and commands need approval:\n"
-      "          /mode ask    always ask\n"
-      "          /mode rules  ask unless fixed safety rules allow it\n"
-      "          /mode auto   the rules, then a check by the model for\n"
-      "                       what the rules cannot settle\n"
-      "          /mode yes    never ask\n"
-      "  /usage  show tokens used this session, and cache hits\n"
-      "  /help   show this\n"
-      "  /exit   quit (or press ctrl-d)\n"
+      "  /clear    forget the conversation\n"
+      "  /compact  replace the conversation with a summary, to save space\n"
+      "  /mode     show or set when edits and commands need approval:\n"
+      "              /mode ask    always ask\n"
+      "              /mode rules  ask unless fixed safety rules allow it\n"
+      "              /mode auto   the rules, then a check by the model\n"
+      "                           for what the rules cannot settle\n"
+      "              /mode yes    never ask\n"
+      "  /usage    show tokens used, cache hits, and context size\n"
+      "  /help     show this\n"
+      "  /exit     quit (or press ctrl-d)\n"
       "^C stops the current reply or command.\n");
 }
 
@@ -793,8 +982,12 @@ showusage(void)
   num("", total.cwrite, " written to it)\n");
   if (in) num("cache hits:    ", total.cread * 100 / in, "% of input\n");
   num("output tokens: ", total.out, "\n");
-  num("context now:   ", lastmain.in + lastmain.cread + lastmain.cwrite,
-      " tokens, as of the last reply\n");
+  num("context now:   ", estimate(), " tokens, roughly");
+  if (ctxwin) {
+    num(", of a window of ", ctxwin, "");
+    num(" (", estimate() * 100 / ctxwin, "%)");
+  }
+  outs("\n");
 }
 
 static void
@@ -824,9 +1017,17 @@ main(int argc, char **argv)
   base = env("KRAFT_URL", "http://127.0.0.1:1234");
   if (!pickmode(env("KRAFT_MODE", "ask")))
     strerr_die(100, FATAL, "KRAFT_MODE must be ask, rules, auto or yes", 0);
-  while ((opt = getopt(argc, argv, "a:m:n:P:tu:y")) != -1)
+  if ((key = env("KRAFT_CONTEXT", 0)) &&
+      (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
+    strerr_die(100, FATAL, "KRAFT_CONTEXT must be a number of tokens", 0);
+  while ((opt = getopt(argc, argv, "a:c:m:n:P:tu:y")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
+    case 'c':
+      if (!*optarg || scan_ulong(optarg, &ctxwin) != str_len(optarg) ||
+          !ctxwin)
+        strerr_die(100, USAGE, 0, 0);
+      break;
     case 'm': model = optarg; break;
     case 'n':
       if (!*optarg || scan_ulong(optarg, &max) != str_len(optarg) || !max)
@@ -850,7 +1051,8 @@ main(int argc, char **argv)
   /* accept base URLs given with or without a trailing /v1 */
   i = url.path.len - 1;
   if (i >= 3 && !byte_diff(url.path.s + i - 3, 3, "/v1")) i -= 3;
-  if (!stralloc_copyb(&path, url.path.s, i)) nomem();
+  if (!stralloc_copyb(&pfx, url.path.s, i)) nomem();
+  if (!stralloc_copy(&path, &pfx)) nomem();
   if (!stralloc_cats(&path, api->endpoint)) nomem();
   if (!stralloc_0(&path)) nomem();
 
@@ -868,13 +1070,18 @@ main(int argc, char **argv)
   if (!stralloc_copys(&hdrs, "Content-Type: application/json\r\n"
       "Accept: text/event-stream\r\n") || !stralloc_cats(&hdrs, api->hdrs))
     nomem();
+  if (!stralloc_copys(&ghdrs, api->hdrs)) nomem();
   if ((key = readkey())) {
     if (!stralloc_cats(&hdrs, api->keyhdr) || !stralloc_cats(&hdrs, key) ||
         !stralloc_cats(&hdrs, "\r\n"))
       nomem();
+    if (!stralloc_cats(&ghdrs, api->keyhdr) || !stralloc_cats(&ghdrs, key) ||
+        !stralloc_cats(&ghdrs, "\r\n"))
+      nomem();
   }
-  if (!stralloc_0(&hdrs)) nomem();
+  if (!stralloc_0(&hdrs) || !stralloc_0(&ghdrs)) nomem();
   mksystem();
+  if (!ctxwin) findwindow();
 
   /* a task on the command line: do it and exit */
   if (*argv) {
@@ -921,6 +1128,12 @@ main(int argc, char **argv)
     }
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
     if (!str_diff(line.s, "/usage")) { showusage(); continue; }
+    if (!str_diff(line.s, "/compact")) {
+      intr = 0;
+      if (!conv.n) outs("(nothing to compact)\n");
+      else compact(0);
+      continue;
+    }
     if (str_start(line.s, "/mode ")) {
       if (!pickmode(line.s + 6)) outs("(modes are ask, auto and yes)\n");
       else showmode();
