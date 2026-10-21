@@ -111,6 +111,31 @@ procstat -e shows nothing.  path_secret() keeps the file tools out of
 ~/.kraft, grep and find_files skip it, and perm_auto() never lets a
 command that mentions .kraft run without asking.
 
+Testing
+-------
+
+make test runs the unit tests (t/json, t/sse, t/conv, t/perm, t/mcp)
+and then t/agent.sh, which runs kraft itself from end to end against
+t/fakeapi: a model server that plays a script of replies, streamed
+in small pieces in either API's format, and keeps each request it
+gets.  A scenario is a script, a kraft command line, and what should
+come of it:
+
+  setup "a tool, then the answer" <<EOF
+  reply
+  tool write_file {"path":"a.txt","content":"hi"}
+  reply
+  text Written.
+  EOF
+  run -P yes -p "write a.txt"
+  out "Written."            # on stdout
+  file a.txt hi             # in the project
+  req 2 "toolu_1"           # in the second request's body
+
+Each runs in a fresh $HOME and project directory, so no config of
+yours gets in.  t/mcpd is a toy MCP server for the MCP scenarios.  A
+new feature should come with a scenario.
+
 Fuzzing
 -------
 
