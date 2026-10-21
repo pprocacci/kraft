@@ -441,11 +441,16 @@ inside(const char *path, stralloc *why)
     never(why, t.s, " is outside the working directory");
     goto out;
   }
-  for (k = cl; t.s[k]; ++k)
+  for (k = cl; t.s[k]; ++k) {
     if (str_start(t.s + k, "/.git") && (!t.s[k + 5] || t.s[k + 5] == '/')) {
       never(why, "the file is inside .git", 0);
       goto out;
     }
+    if (str_start(t.s + k, "/.kraft") && (!t.s[k + 7] || t.s[k + 7] == '/')) {
+      never(why, "the file is kraft's settings, which only the user may change", 0);
+      goto out;
+    }
+  }
   ok = 1;
 out:
   stralloc_free(&t);

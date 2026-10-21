@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <limits.h>
 #include <poll.h>
 #include <signal.h>
@@ -17,6 +18,7 @@
 #include "api.h"
 #include "buffer.h"
 #include "byte.h"
+#include "cfg.h"
 #include "conv.h"
 #include "file.h"
 #include "http.h"
@@ -76,6 +78,19 @@ static volatile sig_atomic_t curfd = -1;  /* the connection being read */
 static struct tool tools[40];  /* this session's: tool_all, and server tools */
 static int allowed[40];  /* by tool index: approved for the session */
 static int websearch;    /* -w: offer Anthropic's server-side web search */
+
+/* a permission rule from a config file; see setting() */
+struct rule {
+  int allow;
+  const char *tool;
+  const char *pat;
+  const char *from;  /* the file it came from */
+};
+
+static int ruled(const struct tool *, const char *, size_t,
+    const struct rule **);
+static int saverule(const struct tool *, const char *, size_t);
+static stralloc ruledeny;  /* why a rule refused the last call */
 
 /* Anthropic's web search; it runs on their servers, so it cannot be asked about */
 static const struct tool searchtool = {
@@ -1261,12 +1276,42 @@ check(const struct tool *t, const char *in, size_t n)
 static int
 approve(const struct tool *t, const char *in, size_t n)
 {
+  const struct rule *ru;
   size_t i;
   int c, r;
 
+  /* the user's rules first: a deny holds whatever the mode */
+  if (!stralloc_copys(&ruledeny, "")) nomem();
+  if ((r = ruled(t, in, n, &ru)) < 0) {
+    if (!stralloc_copys(&ruledeny, "refused by the user's rule \"deny ") ||
+        !stralloc_cats(&ruledeny, ru->tool) || !stralloc_cats(&ruledeny, " ") ||
+        !stralloc_cats(&ruledeny, ru->pat) || !stralloc_cats(&ruledeny, "\" in ") ||
+        !stralloc_cats(&ruledeny, ru->from) || !stralloc_0(&ruledeny))
+      nomem();
+    sgr(RED);
+    outs("  (");
+    outs(ruledeny.s);
+    outs(")");
+    sgr(0);
+    outs("\n");
+    return 0;
+  }
+  if (!t->ask) return 1;
+  if (r > 0) {
+    sgr(DIM);
+    outs("  (allowed by the rule \"allow ");
+    outs(ru->tool);
+    outs(" ");
+    outs(ru->pat);
+    outs("\")");
+    sgr(0);
+    outs("\n");
+    return 1;
+  }
+
   /* by name: t may be from a sub-agent's list */
   for (i = 0; tools[i].name && str_diff(tools[i].name, t->name); ++i) ;
-  if (!t->ask || mode == MODE_YES || allowed[i]) return 1;
+  if (mode == MODE_YES || allowed[i]) return 1;
   if (mode == MODE_RULES || mode == MODE_AUTO) {
     r = perm_auto(t->name, in, n, &rwhy);
     if (r == PERM_ALLOW) return 1;
@@ -1290,7 +1335,7 @@ approve(const struct tool *t, const char *in, size_t n)
       outs(")");
     } else {
       sgr(YELLOW);
-      outs("  (auto mode asks: ");
+      outs(mode == MODE_RULES ? "  (the safety rules ask: " : "  (auto mode asks: ");
       outs(rwhy.s);
       outs(")");
     }
@@ -1322,8 +1367,9 @@ approve(const struct tool *t, const char *in, size_t n)
     if (tool_arg(in, n, "url", &tmp)) lines("  GET ", tmp.s, tmp.len, 1);
   }
   flush();
-  c = ui_ask(color ? "  \033[1;33mAllow?\033[0m [y]es, [n]o, [a]lways for "
-      "this session: " : "  Allow? [y]es, [n]o, [a]lways for this session: ");
+  c = ui_ask(color ? "  \033[1;33mAllow?\033[0m [y]es, [n]o, [a]lways this "
+      "session, [p]ermanently here: " : "  Allow? [y]es, [n]o, [a]lways this "
+      "session, [p]ermanently here: ");
   last = '\n';
   if (!c) {
     styled(YELLOW, "  (declined: no terminal to ask on; see -P)");
@@ -1331,6 +1377,7 @@ approve(const struct tool *t, const char *in, size_t n)
     return 0;
   }
   if (c == 'a') allowed[i] = 1;
+  if (c == 'p') saverule(t, in, n);
   return c != 'n';
 }
 
@@ -1467,6 +1514,7 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
       stralloc_copys(&res->text, "the input was not a valid JSON object");
     else if (!approve(t, in, n))
       stralloc_copys(&res->text, intr ? "not run: the user interrupted" :
+          ruledeny.len ? ruledeny.s :
           "the user declined this call; ask them what to do instead");
     else if (!str_diff(t->name, "read_file") && tool_arg(in, n, "path", &tmp) &&
         stralloc_copys(&mwhy, "") &&
@@ -1693,6 +1741,7 @@ help(void)
       "  /undo     put back the files the last task changed (again to go\n"
       "            further back); changes made by commands are not undone\n"
       "  /usage    show tokens used, cache hits, and context size\n"
+      "  /rules    list the allow and deny rules from the config files\n"
       "  /help     show this\n"
       "  /exit     quit (or press ctrl-d)\n"
       "^C stops the current reply or command.\n");
@@ -1823,6 +1872,447 @@ readtask(stralloc *line)
   return r;
 }
 
+/*
+ * Settings and permission rules.  They come from ~/.kraft/config and,
+ * once the user has trusted it, the project's .kraft/config, as lines
+ * of "key value"; environment variables and flags override them.
+ *
+ *   allow TOOL PATTERN   run matching calls without asking
+ *   deny TOOL PATTERN    refuse them, in every mode
+ *
+ * TOOL is a tool's name, edit (for write_file, edit_file and
+ * multi_edit) or *.  PATTERN is a shell glob, matched against a
+ * command, a path relative to the working directory, or a URL.  An
+ * allow rule for bash matches only a plain command, with no ; & | $(
+ * ` < > in it, and no rule can allow changing a .kraft directory.
+ */
+
+static struct rule rules[256];
+static unsigned long nrules;
+static const char *cfgfile;     /* the file being read */
+static const char *cfgapi;      /* api, from a config file */
+static stralloc projcfg;        /* the project's .kraft/config */
+static stralloc word;
+
+static char *
+sdup(const char *s)
+{
+  size_t n = str_len(s) + 1;
+  char *d = alloc(n);
+
+  if (!d) nomem();
+  byte_copy(d, n, s);
+  return d;
+}
+
+static int
+yesno(const char *v)
+{
+  if (!str_diff(v, "yes") || !str_diff(v, "on") || !str_diff(v, "true") ||
+      !str_diff(v, "1"))
+    return 1;
+  if (!str_diff(v, "no") || !str_diff(v, "off") || !str_diff(v, "false") ||
+      !str_diff(v, "0"))
+    return 0;
+  return -1;
+}
+
+static int
+setting(void *arg, const char *k, const char *v, unsigned long line)
+{
+  unsigned long u;
+  size_t i;
+  int y;
+
+  (void)arg;
+  if (!stralloc_copys(&tmp, cfgfile) || !stralloc_cats(&tmp, ":") ||
+      !stralloc_catulong(&tmp, line) || !stralloc_cats(&tmp, ": ") ||
+      !stralloc_0(&tmp))
+    nomem();
+  if (!str_diff(k, "allow") || !str_diff(k, "deny")) {
+    if (nrules == sizeof rules / sizeof rules[0]) {
+      warn(tmp.s, "too many rules", 0);
+      return 1;
+    }
+    i = byte_chr(v, str_len(v), ' ');
+    rules[nrules].allow = !str_diff(k, "allow");
+    rules[nrules].from = cfgfile;
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    rules[nrules].tool = sdup(word.s);
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    rules[nrules].pat = sdup(v[i] ? v + i : "*");
+    if (!*rules[nrules].tool) { warn(tmp.s, k, " needs a tool"); return 1; }
+    ++nrules;
+    return 1;
+  }
+  if (!str_diff(k, "api")) cfgapi = sdup(v);
+  else if (!str_diff(k, "url")) base = sdup(v);
+  else if (!str_diff(k, "model")) model = sdup(v);
+  else if (!str_diff(k, "check_model")) checkmodel = sdup(v);
+  else if (!str_diff(k, "mode")) {
+    if (!pickmode(v)) warn(tmp.s, "mode must be ask, rules, auto or yes", 0);
+  } else if (!str_diff(k, "max_tokens") || !str_diff(k, "context")) {
+    if (!*v || scan_ulong(v, &u) != str_len(v) || !u)
+      warn(tmp.s, k, " must be a number");
+    else if (!str_diff(k, "context")) ctxwin = u;
+    else max = u;
+  } else if (!str_diff(k, "web_search") || !str_diff(k, "show_thinking")) {
+    if ((y = yesno(v)) < 0) warn(tmp.s, k, " must be yes or no");
+    else if (!str_diff(k, "web_search")) websearch = y;
+    else showthink = y;
+  } else
+    warn(tmp.s, "unknown setting ", k);
+  return 1;
+}
+
+static void
+loadcfg(const char *fn, const stralloc *text)
+{
+  cfgfile = sdup(fn);
+  if (cfg_parse(text->s, text->len, setting, 0)) nomem();
+}
+
+/* is fn, with this hash, in ~/.kraft/trusted? */
+static int
+trusted(const char *fn, const char *hash)
+{
+  stralloc t = STRALLOC_ZERO, l = STRALLOC_ZERO;
+  size_t i, e, h = str_len(hash);
+  int yes = 0;
+
+  if (!sessdir(&tmp)) return 0;  /* makes ~/.kraft if need be */
+  tmp.len -= str_len("/sessions");
+  if (!stralloc_cats(&tmp, "/trusted") || !stralloc_0(&tmp)) nomem();
+  if (file_get(tmp.s, &t))
+    for (i = 0; i < t.len && !yes; i = e + 1) {
+      e = i + byte_chr(t.s + i, t.len - i, '\n');
+      if (!stralloc_copyb(&l, t.s + i, e - i) || !stralloc_0(&l)) nomem();
+      yes = l.len > h + 1 && !byte_diff(l.s, h, hash) && l.s[h] == ' ' &&
+          !str_diff(l.s + h + 1, fn);
+    }
+  stralloc_free(&t);
+  stralloc_free(&l);
+  return yes;
+}
+
+/* records fn, with this hash, as trusted, in place of any older entry */
+static void
+trust(const char *fn, const char *hash)
+{
+  stralloc t = STRALLOC_ZERO, u = STRALLOC_ZERO, name = STRALLOC_ZERO;
+  size_t i, e, k;
+  int fd;
+
+  if (!sessdir(&name)) return;
+  name.len -= str_len("/sessions");
+  if (!stralloc_cats(&name, "/trusted") || !stralloc_0(&name)) nomem();
+  if (file_get(name.s, &t))
+    for (i = 0; i < t.len; i = e + 1) {
+      e = i + byte_chr(t.s + i, t.len - i, '\n');
+      k = i + byte_chr(t.s + i, e - i, ' ');
+      if (k < e && e - k - 1 == str_len(fn) && !byte_diff(t.s + k + 1, e - k - 1, fn))
+        continue;
+      if (e > i && (!stralloc_catb(&u, t.s + i, e - i) ||
+          !stralloc_cats(&u, "\n")))
+        nomem();
+    }
+  if (!stralloc_cats(&u, hash) || !stralloc_cats(&u, " ") ||
+      !stralloc_cats(&u, fn) || !stralloc_cats(&u, "\n"))
+    nomem();
+  if ((fd = open(name.s, O_WRONLY | O_CREAT | O_CLOEXEC, 0600)) != -1) close(fd);
+  if (!file_put(name.s, u.s, u.len)) warnsys("unable to write ", name.s);
+  stralloc_free(&t);
+  stralloc_free(&u);
+  stralloc_free(&name);
+}
+
+/*
+ * ~/.kraft/config, then the project's .kraft/config if the user
+ * trusts it: a project from elsewhere could otherwise allow itself
+ * anything.  the trust is for the file's contents, so a change to it
+ * (a git pull, say) has to be trusted again.
+ */
+static void
+loadconfigs(void)
+{
+  stralloc f = STRALLOC_ZERO, hash = STRALLOC_ZERO;
+  const char *home = env("HOME", 0);
+  char cwd[PATH_MAX];
+  int c;
+
+  if (home) {
+    if (!stralloc_copys(&tmp, home) || !stralloc_cats(&tmp, "/.kraft/config") ||
+        !stralloc_0(&tmp))
+      nomem();
+    if (file_get(tmp.s, &f)) {
+      if (!stralloc_copy(&hash, &tmp)) nomem();
+      loadcfg(hash.s, &f);
+    }
+  }
+  if (!getcwd(cwd, sizeof cwd)) goto out;
+  if (!stralloc_copys(&projcfg, cwd) || !stralloc_cats(&projcfg, "/.kraft/config") ||
+      !stralloc_0(&projcfg))
+    nomem();
+  if (home && !str_diff(cwd, home)) goto out;  /* that was ~/.kraft/config */
+  if (!file_get(projcfg.s, &f)) goto out;
+  if (!stralloc_copys(&hash, "") || !sha256_hex(&hash, f.s, f.len) ||
+      !stralloc_0(&hash))
+    nomem();
+  if (!trusted(projcfg.s, hash.s)) {
+    if (!isatty(0)) {
+      warn("ignoring ", projcfg.s, " until you trust it (run kraft here on "
+          "a terminal)");
+      goto out;
+    }
+    styled(YELLOW, "This project has settings of its own, which could change "
+        "the permission mode or allow commands to run without asking:");
+    outs("\n");
+    lines("  | ", f.s, f.len, 40);
+    flush();
+    c = ui_ask(color ? "  \033[1;33mUse them?\033[0m [y]es, [n]o: " :
+        "  Use them? [y]es, [n]o: ");
+    last = '\n';
+    if (c != 'y' && c != 'a' && c != 'p') {
+      outs("(ignoring them this time)\n");
+      goto out;
+    }
+    trust(projcfg.s, hash.s);
+  }
+  loadcfg(projcfg.s, &f);
+out:
+  stralloc_free(&f);
+  stralloc_free(&hash);
+}
+
+/* no ; & | $( ` < > or newline: a single plain command */
+static int
+plain(const char *s)
+{
+  for (; *s; ++s)
+    if (*s == ';' || *s == '&' || *s == '|' || *s == '`' || *s == '<' ||
+        *s == '>' || *s == '\n' || (*s == '$' && s[1] == '('))
+      return 0;
+  return 1;
+}
+
+/* path, relative to the working directory if it is inside it */
+static void
+relpath(const char *p, stralloc *out)
+{
+  char real[PATH_MAX], cwd[PATH_MAX];
+  size_t n;
+
+  if (!stralloc_copys(out, p)) nomem();
+  if (!realpath(".", cwd)) goto out;
+  if (!realpath(p, real)) {
+    /* a new file: resolve its directory */
+    n = str_len(p);
+    while (n && p[n - 1] != '/') --n;
+    if (!stralloc_copyb(out, n ? p : ".", n ? n : 1) || !stralloc_0(out)) nomem();
+    if (!realpath(out->s, real)) { stralloc_copys(out, p); goto out; }
+    if (!stralloc_copys(out, real) || !stralloc_cats(out, "/") ||
+        !stralloc_cats(out, p + n))
+      nomem();
+  } else if (!stralloc_copys(out, real)) nomem();
+  if (!stralloc_0(out)) nomem();
+  n = str_len(cwd);
+  if (str_start(out->s, cwd) && out->s[n] == '/')
+    byte_copy(out->s, str_len(out->s + n + 1) + 1, out->s + n + 1);
+out:
+  if (!stralloc_0(out)) nomem();
+}
+
+static int
+isedit(const char *name)
+{
+  return !str_diff(name, "write_file") || !str_diff(name, "edit_file") ||
+      !str_diff(name, "multi_edit");
+}
+
+static int
+forme(const struct rule *r, const char *name)
+{
+  return !str_diff(r->tool, "*") || !str_diff(r->tool, name) ||
+      (!str_diff(r->tool, "edit") && isedit(name));
+}
+
+/* does pattern match s, or (for a deny rule) any part of command s? */
+static int
+hits(const char *pat, const char *s, int parts)
+{
+  stralloc seg = STRALLOC_ZERO;
+  size_t i, e, a, b;
+  int hit = !fnmatch(pat, s, 0);
+
+  for (i = 0; parts && !hit && s[i]; i = e + (s[e] != 0)) {
+    for (e = i; s[e] && !(s[e] == ';' || s[e] == '&' || s[e] == '|' ||
+        s[e] == '\n' || s[e] == '(' || s[e] == ')' || s[e] == '`'); ++e) ;
+    for (a = i; a < e && (s[a] == ' ' || s[a] == '\t'); ++a) ;
+    for (b = e; b > a && (s[b - 1] == ' ' || s[b - 1] == '\t'); --b) ;
+    if (a == b) continue;
+    if (!stralloc_copyb(&seg, s + a, b - a) || !stralloc_0(&seg)) nomem();
+    hit = !fnmatch(pat, seg.s, 0);
+  }
+  stralloc_free(&seg);
+  return hit;
+}
+
+/* what the rules say about tool t with input in: 1 allow, -1 deny, 0 */
+static int
+ruled(const struct tool *t, const char *in, size_t n, const struct rule **why)
+{
+  static stralloc subj, arg;
+  unsigned long i;
+  int bash = !str_diff(t->name, "bash"), canallow = 1;
+
+  /* what the patterns are matched against */
+  if (!stralloc_copys(&subj, "")) nomem();
+  if (bash) {
+    if (!tool_arg(in, n, "command", &arg)) canallow = 0;
+    else if (!stralloc_copy(&subj, &arg)) nomem();
+  } else if (isedit(t->name) || !str_diff(t->name, "read_file")) {
+    if (!tool_arg(in, n, "path", &arg)) canallow = 0;
+    else {
+      relpath(arg.s, &subj);
+      subj.len = str_len(subj.s);
+    }
+  } else if (!str_diff(t->name, "web_fetch")) {
+    if (!tool_arg(in, n, "url", &arg)) canallow = 0;
+    else if (!stralloc_copy(&subj, &arg)) nomem();
+  }
+  if (!stralloc_0(&subj)) nomem();
+  if (bash && !plain(subj.s)) canallow = 0;
+  /* the model must not grant itself permissions */
+  if (isedit(t->name) && (str_start(subj.s, ".kraft/") ||
+      hits("*/.kraft/*", subj.s, 0)))
+    canallow = 0;
+
+  for (i = 0; i < nrules; ++i)
+    if (!rules[i].allow && forme(&rules[i], t->name) &&
+        hits(rules[i].pat, subj.s, bash)) {
+      *why = &rules[i];
+      return -1;
+    }
+  for (i = 0; canallow && i < nrules; ++i)
+    if (rules[i].allow && forme(&rules[i], t->name) &&
+        hits(rules[i].pat, subj.s, 0)) {
+      *why = &rules[i];
+      return 1;
+    }
+  return 0;
+}
+
+/* appends s to out with the glob characters in it made literal */
+static void
+literal(stralloc *out, const char *s)
+{
+  for (; *s; ++s) {
+    if ((*s == '*' || *s == '?' || *s == '[' || *s == '\\') &&
+        !stralloc_append(out, '\\'))
+      nomem();
+    if (!stralloc_append(out, *s)) nomem();
+  }
+}
+
+/*
+ * the "permanently" answer: a rule allowing just this call goes in
+ * the project's .kraft/config, which stays trusted.  returns 1 if a
+ * rule was saved.
+ */
+static int
+saverule(const struct tool *t, const char *in, size_t n)
+{
+  stralloc r = STRALLOC_ZERO, f = STRALLOC_ZERO, hash = STRALLOC_ZERO;
+  const char *s;
+  size_t k;
+  int fd, ok = 0;
+
+  if (!stralloc_copys(&r, "allow ") || !stralloc_cats(&r, isedit(t->name) ?
+      "edit" : t->name) || !stralloc_cats(&r, " "))
+    nomem();
+  if (!str_diff(t->name, "bash")) {
+    if (!tool_arg(in, n, "command", &tmp) || !plain(tmp.s)) {
+      styled(YELLOW, "  (only a plain command can be saved as a rule; "
+          "allowed this once)");
+      outs("\n");
+      goto out;
+    }
+    literal(&r, tmp.s);
+  } else if (isedit(t->name)) {
+    if (!tool_arg(in, n, "path", &tmp)) goto out;
+    relpath(tmp.s, &f);
+    if (str_start(f.s, ".kraft/") || hits("*/.kraft/*", f.s, 0)) goto out;
+    literal(&r, f.s);
+  } else if (!str_diff(t->name, "web_fetch")) {
+    if (!tool_arg(in, n, "url", &tmp)) goto out;
+    /* the whole site: scheme, host and port */
+    s = tmp.s + (str_start(tmp.s, "https://") ? 8 : 7);
+    k = byte_chr(s, str_len(s), '/');
+    if (!stralloc_copyb(&f, tmp.s, (size_t)(s - tmp.s) + k) || !stralloc_0(&f))
+      nomem();
+    literal(&r, f.s);
+    if (!stralloc_cats(&r, "/*")) nomem();
+  } else if (!stralloc_cats(&r, "*")) nomem();
+  if (!stralloc_cats(&r, "\n")) nomem();
+
+  if (!stralloc_copyb(&f, projcfg.s, str_len(projcfg.s) - 7) || !stralloc_0(&f))
+    nomem();
+  mkdir(f.s, 0755);
+  fd = open(projcfg.s, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+  if (fd == -1 || buffer_unixwrite(fd, r.s, r.len) != (ssize_t)r.len) {
+    warnsys("unable to add a rule to ", projcfg.s);
+    if (fd != -1) close(fd);
+    goto out;
+  }
+  close(fd);
+  /* we wrote it, so it stays trusted */
+  if (file_get(projcfg.s, &f) && stralloc_copys(&hash, "") &&
+      sha256_hex(&hash, f.s, f.len) && stralloc_0(&hash))
+    trust(projcfg.s, hash.s);
+  --r.len;  /* without the newline */
+  if (!stralloc_0(&r)) nomem();
+  cfgfile = sdup(projcfg.s);
+  setting(0, r.s[0] == 'a' ? "allow" : "deny", r.s + 6, 0);
+  sgr(DIM);
+  outs("  (saved in ");
+  outs(projcfg.s);
+  outs(": ");
+  outs(r.s);
+  outs(")");
+  sgr(0);
+  outs("\n");
+  ok = 1;
+out:
+  stralloc_free(&r);
+  stralloc_free(&f);
+  stralloc_free(&hash);
+  return ok;
+}
+
+static void
+showrules(void)
+{
+  unsigned long i;
+
+  if (!nrules) {
+    outs("(no rules; see the PERMISSIONS section of kraft(1))\n");
+    return;
+  }
+  for (i = 0; i < nrules; ++i) {
+    sgr(rules[i].allow ? GREEN : RED);
+    outs(rules[i].allow ? "allow " : "deny ");
+    outs(rules[i].tool);
+    outs(" ");
+    outs(rules[i].pat);
+    sgr(DIM);
+    outs("   (");
+    outs(rules[i].from);
+    outs(")");
+    sgr(0);
+    outs("\n");
+  }
+}
+
 static void
 showmode(void)
 {
@@ -1835,7 +2325,7 @@ int
 main(int argc, char **argv)
 {
   const char *aname, *key;
-  int opt, again = 0;
+  int opt, resumeit = 0;
   char cwd[PATH_MAX];
   size_t i;
   struct sigaction sa;
@@ -1850,10 +2340,14 @@ main(int argc, char **argv)
   sa.sa_flags = 0;  /* no SA_RESTART: blocked calls must return EINTR */
   sigaction(SIGINT, &sa, 0);
   atexit(job_killall);  /* background commands do not outlive kraft */
-  aname = env("KRAFT_API", "anthropic");
-  model = env("KRAFT_MODEL", 0);
-  base = env("KRAFT_URL", "http://127.0.0.1:1234");
-  if (!pickmode(env("KRAFT_MODE", "ask")))
+
+  /* defaults, then the config files, then the environment, then flags */
+  loadconfigs();
+  aname = env("KRAFT_API", cfgapi ? cfgapi : "anthropic");
+  model = env("KRAFT_MODEL", model);
+  base = env("KRAFT_URL", base ? base : "http://127.0.0.1:1234");
+  checkmodel = env("KRAFT_CHECK_MODEL", checkmodel);
+  if (!pickmode(env("KRAFT_MODE", modes[mode])))
     strerr_die(100, FATAL, "KRAFT_MODE must be ask, rules, auto or yes", 0);
   if ((key = env("KRAFT_CONTEXT", 0)) &&
       (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
@@ -1872,7 +2366,7 @@ main(int argc, char **argv)
         strerr_die(100, USAGE, 0, 0);
       break;
     case 'P': if (!pickmode(optarg)) strerr_die(100, USAGE, 0, 0); break;
-    case 'r': again = 1; break;
+    case 'r': resumeit = 1; break;
     case 'w': websearch = 1; break;
     case 't': showthink = 1; break;
     case 'u': base = optarg; break;
@@ -1885,7 +2379,7 @@ main(int argc, char **argv)
     if (!str_diff(aname, apis[i].name)) api = &apis[i];
   if (!api) strerr_die(100, FATAL, "unknown API: ", aname);
   if (!model) strerr_die(100, FATAL, "no model: use -m or set KRAFT_MODEL", 0);
-  checkmodel = env("KRAFT_CHECK_MODEL", model);
+  if (!checkmodel) checkmodel = model;
   if (!url_parse(&url, base)) strerr_die(100, FATAL, "bad URL: ", base);
 
   /* accept base URLs given with or without a trailing /v1 */
@@ -1958,7 +2452,7 @@ main(int argc, char **argv)
   if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||
       !stralloc_0(&cwdsa))
     nomem();
-  if (again && !resume()) outs("(no earlier session in this directory)\n");
+  if (resumeit && !resume()) outs("(no earlier session in this directory)\n");
   if (!sessfn.len) newsession();
 
   /* a task on the command line: do it and exit */
@@ -2009,6 +2503,7 @@ main(int argc, char **argv)
     }
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
     if (!str_diff(line.s, "/usage")) { showusage(); continue; }
+    if (!str_diff(line.s, "/rules")) { showrules(); continue; }
     if (!str_diff(line.s, "/undo")) {
       if (undo()) save();
       else outs("(nothing to undo)\n");

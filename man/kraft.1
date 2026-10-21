@@ -135,7 +135,13 @@ to allow the call,
 .Cm n
 to refuse it, or
 .Cm a
-to allow that tool for the rest of the session.
+to allow that tool for the rest of the session, or
+.Cm p
+to allow exactly this call from now on: a rule saying so is added to
+the project's
+.Pa .kraft/config
+(see
+.Sx CONFIGURATION ) .
 .It Cm rules
 Calls that a fixed, conservative set of rules finds safe are allowed
 without asking; you are asked about the rest, with the reason.
@@ -212,6 +218,101 @@ out of the environment before any command runs.
 Commands also run with limits: an hour of CPU time per process, files
 of at most 4 GB, at most 2048 processes for the user, and no core
 dumps.
+.Pp
+Rules in the config files come before the mode: a
+.Cm deny
+rule refuses a call in every mode,
+.Cm yes
+included, and an
+.Cm allow
+rule lets one run without asking.
+.Sh CONFIGURATION
+Settings are read from
+.Pa ~/.kraft/config ,
+then from
+.Pa .kraft/config
+in the current directory; environment variables and flags override
+them.
+Each line is a key and a value; blank lines and lines starting with
+.Ql #
+are ignored.
+.Bd -literal -offset indent
+url https://api.anthropic.com
+model claude-opus-5
+mode auto
+allow bash make test*
+allow edit src/*
+deny bash git push*
+.Ed
+.Pp
+The settings are
+.Cm api ,
+.Cm url ,
+.Cm model ,
+.Cm check_model ,
+.Cm mode ,
+.Cm max_tokens ,
+.Cm context ,
+.Cm web_search
+and
+.Cm show_thinking
+(the last two
+.Cm yes
+or
+.Cm no ) ,
+as for the options and environment variables of the same meaning.
+.Pp
+.Cm allow Ar tool pattern
+and
+.Cm deny Ar tool pattern
+are permission rules.
+.Ar tool
+is a tool's name,
+.Cm edit
+for
+.Cm write_file ,
+.Cm edit_file
+and
+.Cm multi_edit ,
+or
+.Cm * .
+.Ar pattern
+is a shell glob, in which
+.Ql *
+matches anything,
+.Ql /
+included; it is matched against the command for
+.Cm bash ,
+the path, relative to the current directory, for the file tools, and
+the URL for
+.Cm web_fetch .
+An
+.Cm allow
+rule for
+.Cm bash
+matches only a plain command, with none of
+.Ql ;\& & | $( \` < >
+in it, so that
+.Ql make test*
+does not also allow
+.Ql make test; rm -rf ~ .
+A
+.Cm deny
+rule for
+.Cm bash
+also matches any part of a compound command.
+No rule can allow changing a
+.Pa .kraft
+directory.
+.Pp
+A project's
+.Pa .kraft/config
+is used only once you have trusted it: kraft shows it and asks the
+first time, and again whenever it changes, since a project from
+elsewhere could otherwise give itself any permission.
+Rules that kraft adds itself, with the
+.Cm p
+answer, keep it trusted.
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.
@@ -292,6 +393,8 @@ Only changes made with
 and
 .Cm multi_edit
 can be undone, not what commands did.
+.It Cm /rules
+List the permission rules in force, and where each came from.
 .It Cm /usage
 Show the tokens used this session: input, how much of it was read
 from or written to the prompt cache, output, and roughly how full
@@ -364,6 +467,11 @@ Beside each is a
 .Pa .undo
 directory holding the files as they were before each change, for
 .Cm /undo .
+.It Pa ~/.kraft/config , .kraft/config
+Settings and permission rules; see
+.Sx CONFIGURATION .
+.It Pa ~/.kraft/trusted
+The project config files you have trusted, with a hash of each.
 .It Pa KRAFT.md
 Project instructions, read from the current directory and given to
 the model.

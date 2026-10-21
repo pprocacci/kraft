@@ -5,9 +5,10 @@
 #include "ui.h"
 
 /*
- * asks question q on the terminal and returns 'y', 'n' or 'a' (for
- * "always"); any other answer, or an interrupt, counts as 'n'.
- * returns 0 if there is no terminal to ask on.
+ * asks question q on the terminal and returns 'y', 'n', 'a' (for
+ * "always") or 'p' (for "permanently"); any other answer, or an
+ * interrupt, counts as 'n'.  returns 0 if there is no terminal to
+ * ask on.
  */
 int
 ui_ask(const char *q)
@@ -28,5 +29,6 @@ ui_ask(const char *q)
     if (buf[i] != ' ' && buf[i] != '\t') { c = buf[i]; break; }
   if (c == 'Y') c = 'y';
   if (c == 'A') c = 'a';
-  return (c == 'y' || c == 'a') ? c : 'n';
+  if (c == 'P') c = 'p';
+  return (c == 'y' || c == 'a' || c == 'p') ? c : 'n';
 }
