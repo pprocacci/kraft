@@ -46,7 +46,7 @@ message(struct conv *c, const char *d, size_t n)
         !stralloc_0(&p))
       return 0;
     if (!json_get(d, n, p.s, &v, &vn)) break;
-    if (!num(v, vn, "t", &type) || type > BLK_SERVER) return 0;
+    if (!num(v, vn, "t", &type) || type > BLK_MEDIA) return 0;
     if (!(b = conv_block(m, (int)type))) return 0;
     if (num(v, vn, "e", &e) && e) b->iserr = 1;
     if (!str(v, vn, "id", &b->id) || !str(v, vn, "name", &b->name) ||

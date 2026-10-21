@@ -1,4 +1,5 @@
 #include "api.h"
+#include "byte.h"
 #include "conv.h"
 #include "json.h"
 #include "oai.h"
@@ -26,7 +27,7 @@ oai_render(stralloc *o, const struct req *q)
   const struct msg *m;
   const struct block *b;
   size_t i, j;
-  int first = 1, ntools, firstt;
+  int first = 1, ntools, nmedia, firstt;
 
   C(stralloc_copys(o, "{\"model\":"));
   C(json_str(o, q->model, str_len(q->model)));
@@ -61,13 +62,15 @@ oai_render(stralloc *o, const struct req *q)
   for (i = 0; i < q->conv->n; ++i) {
     m = &q->conv->m[i];
     C(stralloc_copys(&text, ""));
-    ntools = 0;
+    ntools = nmedia = 0;
     for (j = 0; j < m->n; ++j) {
       b = &m->b[j];
       if (b->type == BLK_TEXT && b->text.len) {
         if (text.len) C(stralloc_cats(&text, "\n\n"));
         C(stralloc_catb(&text, b->text.s, b->text.len));
-      } else if (b->type == BLK_TOOL)
+      } else if (b->type == BLK_MEDIA && b->text.len)
+        ++nmedia;
+      else if (b->type == BLK_TOOL)
         ++ntools;
       else if (b->type == BLK_RESULT) {
         C(sep(o, &first));
@@ -79,11 +82,37 @@ oai_render(stralloc *o, const struct req *q)
       }
     }
     if (m->role == ROLE_USER) {
-      if (!text.len) continue;
+      if (!text.len && !nmedia) continue;
       C(sep(o, &first));
       C(stralloc_cats(o, "{\"role\":\"user\",\"content\":"));
-      C(json_str(o, text.s, text.len));
+      if (!nmedia) {
+        C(json_str(o, text.s, text.len));
+        C(stralloc_cats(o, "}"));
+        continue;
+      }
+      /*
+       * tool messages carry only text here, so images from tools
+       * come in this user message, after them
+       */
+      C(stralloc_cats(o, "[{\"type\":\"text\",\"text\":"));
+      if (text.len) C(json_str(o, text.s, text.len));
+      else C(json_str(o, "(the images from the tool calls above)", 38));
       C(stralloc_cats(o, "}"));
+      for (j = 0; j < m->n; ++j) {
+        b = &m->b[j];
+        if (b->type != BLK_MEDIA || !b->text.len) continue;
+        if (b->aux.len > 6 && !byte_diff(b->aux.s, 6, "image/")) {
+          C(stralloc_cats(o, ",{\"type\":\"image_url\",\"image_url\":"
+              "{\"url\":\"data:"));
+          C(stralloc_catb(o, b->aux.s, b->aux.len));
+          C(stralloc_cats(o, ";base64,"));
+          C(stralloc_catb(o, b->text.s, b->text.len));
+          C(stralloc_cats(o, "\"}}"));
+        } else
+          C(stralloc_cats(o, ",{\"type\":\"text\",\"text\":"
+              "\"[a PDF was attached, but this API cannot carry PDFs]\"}"));
+      }
+      C(stralloc_cats(o, "]}"));
       continue;
     }
     if (!text.len && !ntools) continue;

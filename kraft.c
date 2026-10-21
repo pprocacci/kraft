@@ -21,7 +21,9 @@
 #include "http.h"
 #include "job.h"
 #include "json.h"
+#include "media.h"
 #include "oai.h"
+#include "path.h"
 #include "perm.h"
 #include "proc.h"
 #include "scan.h"
@@ -87,6 +89,7 @@ static struct reply reply;
 static stralloc host, path, hdrs, sys, body, event, data, line, tmp, tlswhy;
 static struct conv cconv;      /* the auto-mode check's own conversation */
 static stralloc rwhy, cwhy;    /* why the rules, and the check, said no */
+static stralloc mwhy;          /* what attach() did */
 static const struct usage nousage;
 static struct usage total;     /* this session, all requests */
 static struct usage lastmain;  /* the last request of the main conversation */
@@ -1024,6 +1027,91 @@ approve(const struct tool *t, const char *in, size_t n)
 }
 
 /*
+ * Images and PDFs.  read_file on one, or @path in the user's words,
+ * attaches it to the conversation for the model to see.  PDFs go only
+ * to the Anthropic API itself; elsewhere read_file reads their text.
+ */
+
+#define MAXIMAGE (3750 * 1024)   /* 5 MB once base64-encoded, the API's limit */
+#define MAXPDF (16 * 1024 * 1024)
+
+static int pdfok;  /* the server takes PDFs */
+
+/*
+ * attaches the file at path to message m as a media block belonging
+ * to tool call id (or to none, if id is empty), if it is an image, or
+ * a PDF the server takes.  returns 1 if it did, 0 if the file is not
+ * such a thing, -1 if it is but cannot be attached, with the reason
+ * in why.  on success why says what was attached.
+ */
+static int
+attach(struct msg *m, const stralloc *id, const char *path, stralloc *why)
+{
+  stralloc f = STRALLOC_ZERO;
+  struct block *b;
+  const char *type;
+  int r = 0;
+
+  if (path_secret(path) || !file_get(path, &f)) goto out;
+  if (!(type = media_type(f.s, f.len))) goto out;
+  if (!str_diff(type, "application/pdf") && !pdfok) goto out;
+  r = -1;
+  if (f.len > (str_start(type, "image/") ? MAXIMAGE : MAXPDF)) {
+    if (!stralloc_copys(why, path) || !stralloc_cats(why, " is too large "
+        "to send to the model"))
+      nomem();
+    goto out;
+  }
+  if (!(b = conv_block(m, BLK_MEDIA))) nomem();
+  if (!stralloc_copy(&b->id, id) || !stralloc_copys(&b->aux, type) ||
+      !base64_enc(&b->text, f.s, f.len))
+    nomem();
+  if (!stralloc_copys(why, "attached ") || !stralloc_cats(why, path) ||
+      !stralloc_cats(why, " (") || !stralloc_cats(why, type) ||
+      !stralloc_cats(why, ", ") ||
+      !stralloc_catulong(why, (unsigned long)(f.len + 1023) / 1024) ||
+      !stralloc_cats(why, " KB) for the model to see"))
+    nomem();
+  /* an image is some 1600 tokens; a PDF page more, its size a guess */
+  pending += str_start(type, "image/") ? 6400 : f.len / 2;
+  r = 1;
+out:
+  stralloc_free(&f);
+  return r;
+}
+
+/* attaches the files named @path in the user's words s to message m */
+static void
+mentions(struct msg *m, const char *s, size_t n)
+{
+  stralloc p = STRALLOC_ZERO, why = STRALLOC_ZERO, noid = STRALLOC_ZERO;
+  size_t i, e;
+
+  for (i = 0; i < n; ++i) {
+    if (s[i] != '@' || (i && s[i - 1] != ' ' && s[i - 1] != '\n' &&
+        s[i - 1] != '\t' && s[i - 1] != '('))
+      continue;
+    for (e = i + 1; e < n && s[e] != ' ' && s[e] != '\n' && s[e] != '\t'; ++e) ;
+    while (e > i + 1 && (s[e - 1] == '.' || s[e - 1] == ',' ||
+        s[e - 1] == ';' || s[e - 1] == ':' || s[e - 1] == ')' ||
+        s[e - 1] == '!' || s[e - 1] == '?'))
+      --e;
+    if (e == i + 1) continue;
+    if (!stralloc_copyb(&p, s + i + 1, e - i - 1) || !stralloc_0(&p)) nomem();
+    if (!stralloc_copys(&why, "")) nomem();
+    if (attach(m, &noid, p.s, &why) && why.len) {
+      if (!stralloc_0(&why)) nomem();
+      outs("(");
+      outs(why.s);
+      outs(")\n");
+    }
+    i = e;
+  }
+  stralloc_free(&p);
+  stralloc_free(&why);
+}
+
+/*
  * runs the tool calls in conversation c's last assistant message,
  * from tool list tl, and puts their results in a new user message.
  * if cut is set the reply was truncated, so the calls are answered
@@ -1040,6 +1128,7 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
   struct block *b, *res;
   const char *in;
   size_t i, n;
+  int r;
 
   if (!(u = conv_msg(c, ROLE_USER))) nomem();
   a = &c->m[c->n - 2];
@@ -1071,7 +1160,14 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
     else if (!approve(t, in, n))
       stralloc_copys(&res->text, intr ? "not run: the user interrupted" :
           "the user declined this call; ask them what to do instead");
-    else {
+    else if (!str_diff(t->name, "read_file") && tool_arg(in, n, "path", &tmp) &&
+        stralloc_copys(&mwhy, "") &&
+        (r = attach(u, &b->id, tmp.s, &mwhy)) != 0) {
+      /* an image (or PDF): the model sees the thing itself */
+      res = &u->b[u->n - 1 - (r > 0)];  /* attach may have moved it */
+      if (!stralloc_copy(&res->text, &mwhy)) nomem();
+      res->iserr = r < 0;
+    } else {
       res->iserr = !t->run(in, n, &res->text);
       if (intr) {
         stralloc_cats(&res->text, "\n[interrupted by the user]");
@@ -1210,6 +1306,7 @@ work(const char *s, size_t n)
   if (!(b = conv_block(m, BLK_TEXT))) nomem();
   if (!stralloc_copyb(&b->text, s, n)) nomem();
   pending += n;
+  mentions(m, s, n);  /* @file.png and the like */
 
   for (step = 0; step < MAXSTEPS; ++step) {
     /* compact before the conversation outgrows three quarters of the window */
@@ -1421,8 +1518,9 @@ main(int argc, char **argv)
   for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 3; ++i)
     tools[i] = tool_all[i];
   tools[i++] = tasktool;
+  pdfok = api->render == anth_render && !str_diff(url.host.s, "api.anthropic.com");
   if (websearch) {
-    if (api->render == anth_render && !str_diff(url.host.s, "api.anthropic.com"))
+    if (pdfok)
       tools[i++] = searchtool;
     else
       warn("-w needs the Anthropic API at api.anthropic.com; ignored", 0, 0);

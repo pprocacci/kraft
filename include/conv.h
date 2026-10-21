@@ -19,6 +19,8 @@
 #define BLK_RESULT 3  /* id; text: tool output; iserr */
 #define BLK_RAW 4     /* text: a raw Anthropic content block, sent back as is */
 #define BLK_SERVER 5  /* id, name; text: input as JSON (Anthropic server tool) */
+#define BLK_MEDIA 6   /* an image or PDF: aux: media type; text: base64;
+                         id: the tool call it belongs to, or empty */
 
 struct block {
   int type;

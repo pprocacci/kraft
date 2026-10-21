@@ -1,5 +1,6 @@
 #include "anth.h"
 #include "api.h"
+#include "byte.h"
 #include "conv.h"
 #include "json.h"
 #include "str.h"
@@ -12,7 +13,56 @@ shown(const struct block *b)
 {
   if (b->type == BLK_TEXT) return b->text.len > 0;
   if (b->type == BLK_THINK) return b->text.len || b->aux.len;
+  if (b->type == BLK_MEDIA) return b->text.len && b->aux.len;
   return 1;
+}
+
+/* an image or PDF block */
+static int
+media(stralloc *o, const struct block *b)
+{
+  C(stralloc_cats(o, b->aux.len > 6 && !byte_diff(b->aux.s, 6, "image/") ?
+      "{\"type\":\"image\"" : "{\"type\":\"document\""));
+  C(stralloc_cats(o, ",\"source\":{\"type\":\"base64\",\"media_type\":"));
+  C(json_str(o, b->aux.s, b->aux.len));
+  C(stralloc_cats(o, ",\"data\":\""));
+  C(stralloc_catb(o, b->text.s, b->text.len));
+  return stralloc_cats(o, "\"}}");
+}
+
+/*
+ * a tool result, and any media right after it that belong to it,
+ * which go inside it
+ */
+static int
+result(stralloc *o, const struct msg *m, size_t j)
+{
+  const struct block *b = &m->b[j], *e;
+  size_t k;
+
+  C(stralloc_cats(o, "{\"type\":\"tool_result\",\"tool_use_id\":"));
+  C(json_str(o, b->id.s, b->id.len));
+  C(stralloc_cats(o, ",\"content\":"));
+  k = j + 1;
+  if (k < m->n && m->b[k].type == BLK_MEDIA && m->b[k].id.len == b->id.len &&
+      !byte_diff(m->b[k].id.s, b->id.len, b->id.s)) {
+    C(stralloc_cats(o, "[{\"type\":\"text\",\"text\":"));
+    C(json_str(o, b->text.s, b->text.len));
+    C(stralloc_cats(o, "}"));
+    for (; k < m->n; ++k) {
+      e = &m->b[k];
+      if (e->type != BLK_MEDIA || e->id.len != b->id.len ||
+          byte_diff(e->id.s, b->id.len, b->id.s))
+        break;
+      if (!shown(e)) continue;
+      C(stralloc_cats(o, ","));
+      C(media(o, e));
+    }
+    C(stralloc_cats(o, "]"));
+  } else
+    C(json_str(o, b->text.s, b->text.len));
+  if (b->iserr) C(stralloc_cats(o, ",\"is_error\":true"));
+  return stralloc_cats(o, "}");
 }
 
 static int
@@ -44,15 +94,10 @@ block(stralloc *o, const struct block *b)
     else
       C(stralloc_cats(o, "{}"));
     break;
-  case BLK_RESULT:
-    C(stralloc_cats(o, "{\"type\":\"tool_result\",\"tool_use_id\":"));
-    C(json_str(o, b->id.s, b->id.len));
-    C(stralloc_cats(o, ",\"content\":"));
-    C(json_str(o, b->text.s, b->text.len));
-    if (b->iserr) C(stralloc_cats(o, ",\"is_error\":true"));
-    break;
   case BLK_RAW:
     return stralloc_catb(o, b->text.s, b->text.len);
+  case BLK_MEDIA:
+    return media(o, b);
   }
   return stralloc_cats(o, "}");
 }
@@ -124,9 +169,11 @@ anth_render(stralloc *o, const struct req *q)
     }
     for (j = 0; j < m->n; ++j) {
       if (!shown(&m->b[j])) continue;
+      if (m->b[j].type == BLK_MEDIA && m->b[j].id.len) continue;  /* in its result */
       if (!firstb) C(stralloc_cats(o, ","));
       firstb = 0;
-      C(block(o, &m->b[j]));
+      if (m->b[j].type == BLK_RESULT) C(result(o, m, j));
+      else C(block(o, &m->b[j]));
     }
   }
   if (open != -1) C(stralloc_cats(o, "]}"));

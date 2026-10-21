@@ -190,6 +190,47 @@ openai(void)
   check(has(&o, "{\"role\":\"tool\",\"tool_call_id\":\"call_1\","
       "\"content\":\"contents\"}"), "oai tool message");
   check(has(&o, "\"parameters\":{\"type\":\"object\""), "oai tool schema");
+
+  /* an image from read_file comes after the tool messages */
+  b = conv_block(m, BLK_MEDIA);
+  stralloc_copys(&b->id, "call_1");
+  stralloc_copys(&b->aux, "image/png");
+  stralloc_copys(&b->text, "AAAA");
+  check(oai_render(&o, &q), "oai render with an image");
+  check(has(&o, "\"content\":\"contents\"},{\"role\":\"user\",\"content\":["
+      "{\"type\":\"text\",\"text\":\"(the images from the tool calls above)\"},"
+      "{\"type\":\"image_url\",\"image_url\":{\"url\":"
+      "\"data:image/png;base64,AAAA\"}}]}"), "oai image after tools");
+}
+
+static void
+anthmedia(void)
+{
+  struct conv c = { 0, 0, 0 };
+  struct req q = { "m", 100, 0, 0, 0 };
+  stralloc o = STRALLOC_ZERO;
+  struct msg *m;
+  struct block *b;
+
+  m = conv_msg(&c, ROLE_USER);
+  b = conv_block(m, BLK_RESULT);
+  stralloc_copys(&b->id, "t1");
+  stralloc_copys(&b->text, "attached x.png");
+  b = conv_block(m, BLK_MEDIA);
+  stralloc_copys(&b->id, "t1");
+  stralloc_copys(&b->aux, "image/png");
+  stralloc_copys(&b->text, "AAAA");
+  b = conv_block(m, BLK_MEDIA);  /* attached by the user, @doc.pdf */
+  stralloc_copys(&b->aux, "application/pdf");
+  stralloc_copys(&b->text, "BBBB");
+  q.conv = &c;
+  check(anth_render(&o, &q), "anth render with media");
+  check(has(&o, "{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":"
+      "[{\"type\":\"text\",\"text\":\"attached x.png\"},{\"type\":\"image\","
+      "\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\","
+      "\"data\":\"AAAA\"}}]},{\"type\":\"document\",\"source\":{\"type\":"
+      "\"base64\",\"media_type\":\"application/pdf\",\"data\":\"BBBB\"}}"),
+      "anth image in its result, PDF on its own");
 }
 
 int
@@ -197,6 +238,7 @@ main(void)
 {
   anthropic();
   openai();
+  anthmedia();
   if (!fails) printf("conv: ok\n");
   return fails ? 1 : 0;
 }

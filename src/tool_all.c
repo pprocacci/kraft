@@ -4,7 +4,8 @@ const struct tool tool_all[] = {
   { "read_file",
     "Read a text file. Returns its lines numbered from 1, at most 2000 "
     "lines at a time; use offset and limit to page through long files. "
-    "Read a file before editing it.",
+    "Read a file before editing it. An image (PNG, JPEG, GIF, WebP) is "
+    "shown to you as an image, and a PDF as a document or as its text.",
     "{\"type\":\"object\",\"properties\":{"
     "\"path\":{\"type\":\"string\",\"description\":\"File to read\"},"
     "\"offset\":{\"type\":\"integer\",\"description\":\"First line, from 1\"},"

@@ -2,8 +2,14 @@
 #include <string.h>
 #include "byte.h"
 #include "file.h"
+#include <unistd.h>
 #include "fmt.h"
+#include "media.h"
 #include "path.h"
+#include "proc.h"
+#include "str.h"
+
+#define PDFTOTEXT "/usr/local/bin/pdftotext"
 #include "stralloc.h"
 #include "tool.h"
 
@@ -26,6 +32,7 @@ tool_read(const char *in, size_t n, stralloc *out)
   unsigned long off = 1, lim = 2000, line = 0, shown = 0;
   char num[FMT_ULONG];
   size_t i, e, len, k;
+  const char *ct;
   int ok = 0;
 
   if (!tool_arg(in, n, "path", &path)) return fail(out, "path is required", 0, 0);
@@ -43,7 +50,26 @@ tool_read(const char *in, size_t n, stralloc *out)
     stralloc_cats(out, strerror(errno));
     goto out;
   }
-  if (byte_chr(f.s, f.len < 8192 ? f.len : 8192, '\0') <
+  if ((ct = media_type(f.s, f.len)) && !str_diff(ct, "application/pdf")) {
+    /* a PDF, where the server cannot take one: its text, if we can */
+    char *argv[] = { PDFTOTEXT, "-layout", "-enc", "UTF-8", path.s, "-", 0 };
+    int status;
+
+    if (access(PDFTOTEXT, X_OK) == -1) {
+      fail(out, path.s, " is a PDF; install print/poppler-utils (for "
+          "pdftotext) to read its text", 0);
+      goto out;
+    }
+    if (!stralloc_copys(&f, "") ||
+        !proc_run(argv, 60, 4 * 1024 * 1024, &f, &status) || status) {
+      fail(out, "unable to get the text of ", path.s, " with pdftotext");
+      goto out;
+    }
+  } else if (ct) {
+    fail(out, path.s, " is an image (", ct);
+    stralloc_cats(out, "), which this model cannot be shown");
+    goto out;
+  } else if (byte_chr(f.s, f.len < 8192 ? f.len : 8192, '\0') <
       (f.len < 8192 ? f.len : 8192)) {
     fail(out, path.s, " is a binary file", 0);
     goto out;

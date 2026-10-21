@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "json.h"
+#include "media.h"
 #include "stralloc.h"
 
 static int fails;
@@ -54,6 +55,20 @@ main(void)
 
   check(json_str(&sa, "a\"b\\c\n\x01", 7) && sa.len == 17 &&
       !memcmp(sa.s, "\"a\\\"b\\\\c\\n\\u0001\"", 17), "encode");
+
+  {
+    stralloc b = STRALLOC_ZERO;
+
+    base64_enc(&b, "Man", 3);
+    base64_enc(&b, "Ma", 2);
+    base64_enc(&b, "M", 1);
+    base64_enc(&b, "\377\376\375", 3);
+    check(b.len == 16 && !memcmp(b.s, "TWFuTWE=TQ==//79", 16), "base64");
+    check(media_type("\211PNG\r\n\032\nxxxx", 12) &&
+        !strcmp(media_type("\211PNG\r\n\032\nxxxx", 12), "image/png") &&
+        !strcmp(media_type("%PDF-1.4", 8), "application/pdf") &&
+        !media_type("hello, world", 12), "media types");
+  }
 
   if (!fails) printf("json: ok\n");
   return fails ? 1 : 0;

@@ -35,6 +35,11 @@ Otherwise it prompts for tasks with
 .Sq >\ \&
 until end of input.
 When standard input is not a terminal, each line is a task.
+A word
+.Ar @path
+in a task attaches that file, if it is an image or (with the
+Anthropic API) a PDF, for the model to see.
+.Pp
 The conversation is kept between tasks, so later tasks can refer to
 earlier ones, and saved, so that
 .Fl r
@@ -198,6 +203,13 @@ subject to the permission mode.
 .Bl -tag -width "bash_output"
 .It Cm read_file
 Read a file, with line numbers.
+An image (PNG, JPEG, GIF or WebP) is shown to the model as an image.
+A PDF is sent as a document to the Anthropic API; elsewhere its text
+is read with
+.Xr pdftotext 1 ,
+if
+.Pa graphics/poppler-utils
+is installed.
 .It Cm write_file Ns *
 Create or replace a file.
 .It Cm edit_file Ns *
@@ -227,6 +239,17 @@ List a directory.
 .It Cm web_fetch Ns *
 Fetch an http or https URL and return its text, HTML turned into
 plain text.
+.It Cm task
+Hand a self-contained piece of work to a sub-agent: a separate
+conversation with the same tools, less
+.Cm task ,
+.Cm ask_user
+and
+.Cm todo ,
+whose calls are shown indented and are subject to the permission
+mode.
+Only its final report comes back, so what it read does not fill the
+conversation.
 .It Cm todo
 Keep a checklist for a task of several steps, shown as it changes.
 .It Cm ask_user
