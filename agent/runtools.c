@@ -39,6 +39,9 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
       continue;
     }
     announce(sub ? "  > " : "* ", b, in, n);
+    /* an edit's diff, whether it will be asked about or not */
+    if (!cut && t->name && isedit(t->name) && json_object(in, n))
+      showedit(t, in, n);
     if (cut)
       stralloc_copys(&res->text, "not run: the reply was cut off before "
           "this call was complete");

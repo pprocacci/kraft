@@ -168,6 +168,7 @@ void flush(void);
 int hastools(const struct msg *m);
 int hits(const char *pat, const char *s, int parts);
 int isedit(const char *name);
+void showedit(const struct tool *t, const char *in, size_t n);
 void kwarn(const char *a, const char *b, const char *c);
 void kwarnsys(const char *a, const char *b);
 void lines(const char *p, const char *s, size_t n, unsigned long max);

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "diff.h"
 #include "json.h"
 #include "md.h"
 #include "media.h"
@@ -93,6 +94,29 @@ main(void)
     check(strstr(whole.s, " 2*3") != 0, "md: lone star");
     check(strstr(whole.s, "\033[36mint a; `q`") != 0, "md: fenced block");
     check(strstr(whole.s, "after") != 0, "md: after the fence");
+  }
+
+  {
+    /* line diffs */
+    static const char a[] = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
+    static const char b[] = "1\n2\n3\nfour\n5\n6\n7\n8\n9\n10\n11\n";
+    stralloc d = STRALLOC_ZERO;
+
+    diff_lines(&d, a, sizeof a - 1, b, sizeof b - 1, 1);
+    stralloc_0(&d);
+    check(!strcmp(d.s, "@@ 3\n 3\n-4\n+four\n 5\n@@ 10\n 10\n+11\n"),
+        "diff: two hunks with context");
+    stralloc_copys(&d, "");
+    diff_lines(&d, a, sizeof a - 1, a, sizeof a - 1, 3);
+    check(d.len == 0, "diff: no changes, no output");
+    stralloc_copys(&d, "");
+    diff_lines(&d, "", 0, "new\nfile", 8, 3);
+    stralloc_0(&d);
+    check(!strcmp(d.s, "@@ 1\n+new\n+file\n"), "diff: a new file");
+    stralloc_copys(&d, "");
+    diff_lines(&d, "x\ny\n", 4, "", 0, 3);
+    stralloc_0(&d);
+    check(!strcmp(d.s, "@@ 1\n-x\n-y\n"), "diff: everything removed");
   }
 
   if (!fails) printf("json: ok\n");

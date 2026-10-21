@@ -70,27 +70,9 @@ approve(const struct tool *t, const char *in, size_t n)
     sgr(0);
     outs("\n");
   }
+  /* an edit's diff has been shown already, by runtools() */
   if (!str_diff(t->name, "bash")) {
     if (tool_arg(in, n, "command", &tmp)) lines("  $ ", tmp.s, tmp.len, 20);
-  } else if (!str_diff(t->name, "edit_file")) {
-    if (tool_arg(in, n, "old_string", &tmp)) lines("  - ", tmp.s, tmp.len, 20);
-    if (tool_arg(in, n, "new_string", &tmp)) lines("  + ", tmp.s, tmp.len, 20);
-  } else if (!str_diff(t->name, "write_file")) {
-    if (tool_arg(in, n, "content", &tmp)) lines("  + ", tmp.s, tmp.len, 20);
-  } else if (!str_diff(t->name, "multi_edit")) {
-    static stralloc key;
-    const char *e;
-    size_t en;
-    unsigned long k;
-
-    for (k = 0; k < 8; ++k) {
-      if (!stralloc_copys(&key, "edits.") || !stralloc_catulong(&key, k) ||
-          !stralloc_0(&key))
-        nomem();
-      if (!json_get(in, n, key.s, &e, &en)) break;
-      if (tool_arg(e, en, "old_string", &tmp)) lines("  - ", tmp.s, tmp.len, 8);
-      if (tool_arg(e, en, "new_string", &tmp)) lines("  + ", tmp.s, tmp.len, 8);
-    }
   } else if (!str_diff(t->name, "web_fetch")) {
     if (tool_arg(in, n, "url", &tmp)) lines("  GET ", tmp.s, tmp.len, 1);
   }
