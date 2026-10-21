@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <string.h>
 #include "file.h"
+#include "path.h"
 #include "stralloc.h"
 #include "tool.h"
 
@@ -17,6 +18,12 @@ tool_write(const char *in, size_t n, stralloc *out)
   }
   if (!tool_arg(in, n, "content", &body)) {
     stralloc_copys(out, "content is required");
+    goto out;
+  }
+  if (path_secret(path.s)) {
+    stralloc_copys(out, "refused: ");
+    stralloc_cats(out, path.s);
+    stralloc_cats(out, " is one of kraft's private files");
     goto out;
   }
   if (!file_put(path.s, body.s, body.len)) {

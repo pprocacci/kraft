@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "json.h"
+#include "path.h"
 #include "perm.h"
 #include "stralloc.h"
 
@@ -43,6 +44,12 @@ expect(const char *tool, const char *key, const char *val, int want)
 }
 
 static void
+check(int ok, const char *what)
+{
+  if (!ok) { printf("FAIL %s\n", what); ++fails; }
+}
+
+static void
 cmd(const char *c, int want)
 {
   expect("bash", "command", c, want);
@@ -60,6 +67,24 @@ main(void)
   fd = open("src/a.c", O_WRONLY | O_CREAT, 0644);
   close(fd);
   symlink("/etc/passwd", "evil");
+  /* a home of our own, with a ~/.kraft in it */
+  mkdir("home", 0755);
+  mkdir("home/x", 0755);
+  mkdir("home/.kraft", 0700);
+  mkdir("home/.kraft/sessions", 0700);
+  fd = open("home/.kraft/anthropic.key", O_WRONLY | O_CREAT, 0600);
+  close(fd);
+  symlink("home/.kraft/anthropic.key", "evil2");
+  {
+    char cwd[1024];
+    stralloc h = STRALLOC_ZERO;
+
+    if (!getcwd(cwd, sizeof cwd)) return 2;
+    stralloc_copys(&h, cwd);
+    stralloc_cats(&h, "/home");
+    stralloc_0(&h);
+    setenv("HOME", h.s, 1);
+  }
 
   /* allowed by the rules */
   cmd("ls -la", ALLOW);
@@ -139,6 +164,18 @@ main(void)
   expect("write_file", "path", "evil", ASK);
   expect("write_file", "path", ".git/config", ASK);
   expect("read_file", "path", "src/a.c", UNSURE);  /* never needs approval */
+
+  /* kraft's own keys and sessions */
+  cmd("cat ~/.kraft/anthropic.key", ASK);
+  cmd("ls $HOME/.kraft/sessions", ASK);
+  expect("write_file", "path", "home/.kraft/anthropic.key", ASK);
+  check(path_secret("home/.kraft/anthropic.key"), "secret key file");
+  check(path_secret("home/.kraft"), "secret directory");
+  check(path_secret("home/.kraft/sessions/new.json"), "secret new file");
+  check(path_secret("home/x/../.kraft/anthropic.key"), "secret via ..");
+  check(path_secret("evil2"), "secret via symlink");
+  check(!path_secret("src/a.c"), "ordinary file");
+  check(!path_secret("home/notkraft"), "near miss");
 
   if (!fails) printf("perm: ok\n");
   return fails ? 1 : 0;

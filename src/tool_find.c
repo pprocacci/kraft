@@ -4,6 +4,7 @@
 #include <fnmatch.h>
 #include <fts.h>
 #include <string.h>
+#include "path.h"
 #include "str.h"
 #include "stralloc.h"
 #include "tool.h"
@@ -32,6 +33,12 @@ tool_find(const char *in, size_t n, stralloc *out)
   slash = !!strchr(pat.s, '/');
   dl = str_len(dir.s);
 
+  if (path_secret(dir.s)) {
+    stralloc_copys(out, "refused: ");
+    stralloc_cats(out, dir.s);
+    stralloc_cats(out, " is kraft's private directory");
+    goto out;
+  }
   roots[0] = dir.s;
   roots[1] = 0;
   fts = fts_open(roots, FTS_PHYSICAL | FTS_NOCHDIR, 0);
@@ -45,7 +52,8 @@ tool_find(const char *in, size_t n, stralloc *out)
   stralloc_copys(out, "");
   while ((e = fts_read(fts))) {
     if (e->fts_info == FTS_D && e->fts_level > 0 &&
-        !str_diff(e->fts_name, ".git")) {
+        (!str_diff(e->fts_name, ".git") || (!str_diff(e->fts_name, ".kraft") &&
+        path_secret(e->fts_path)))) {
       fts_set(fts, e, FTS_SKIP);
       continue;
     }

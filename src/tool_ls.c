@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "alloc.h"
+#include "path.h"
 #include "str.h"
 #include "stralloc.h"
 #include "tool.h"
@@ -31,6 +32,12 @@ tool_ls(const char *in, size_t n, stralloc *out)
 
   if (!tool_arg(in, n, "path", &dir) || !dir.len)
     if (!stralloc_copys(&dir, ".") || !stralloc_0(&dir)) goto out;
+  if (path_secret(dir.s)) {
+    stralloc_copys(out, "refused: ");
+    stralloc_cats(out, dir.s);
+    stralloc_cats(out, " is kraft's private directory");
+    goto out;
+  }
   if (!(dp = opendir(dir.s))) {
     stralloc_copys(out, "unable to list ");
     stralloc_cats(out, dir.s);

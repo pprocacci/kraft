@@ -3,6 +3,7 @@
 #include "byte.h"
 #include "file.h"
 #include "fmt.h"
+#include "path.h"
 #include "stralloc.h"
 #include "tool.h"
 
@@ -33,6 +34,10 @@ tool_read(const char *in, size_t n, stralloc *out)
   if (!off) off = 1;
   if (!lim) lim = 2000;
 
+  if (path_secret(path.s)) {
+    fail(out, "refused: ", path.s, " is one of kraft's private files");
+    goto out;
+  }
   if (!file_get(path.s, &f)) {
     fail(out, "unable to read ", path.s, ": ");
     stralloc_cats(out, strerror(errno));

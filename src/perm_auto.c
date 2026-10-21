@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "byte.h"
+#include "path.h"
 #include "perm.h"
 #include "str.h"
 #include "stralloc.h"
@@ -97,6 +98,14 @@ among(const char *w, const char *const *list)
 {
   for (; *list; ++list)
     if (!str_diff(w, *list)) return 1;
+  return 0;
+}
+
+static int
+mentions(const char *s, const char *t)
+{
+  for (; *s; ++s)
+    if (str_start(s, t)) return 1;
   return 0;
 }
 
@@ -456,11 +465,15 @@ perm_auto(const char *name, const char *in, size_t n, stralloc *why)
   hard = reasoned = 0;
   if (!str_diff(name, "write_file") || !str_diff(name, "edit_file")) {
     if (!tool_arg(in, n, "path", &a)) no(why, "no path given", 0);
+    else if (path_secret(a.s))
+      never(why, "the file is one of kraft's private files", 0);
     else ok = inside(a.s, why);
   } else if (!str_diff(name, "bash")) {
     if (!tool_arg(in, n, "command", &a)) no(why, "no command given", 0);
     else if (byte_chr(a.s, a.len, '\0') < a.len)
       never(why, "the command contains a NUL byte", 0);
+    else if (mentions(a.s, ".kraft"))
+      never(why, "the command refers to kraft's private files", 0);
     else {
       ok = command(a.s, why);
       if (has(a.s, '`') || byte_chr(a.s, a.len, '$') < a.len)

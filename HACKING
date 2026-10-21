@@ -72,4 +72,17 @@ TLS
 
 tls_connect() forks a helper that owns the TLS session and relays
 plaintext over a socketpair, ucspi-tls style, so the HTTP code only
-ever sees a file descriptor.  It uses the OpenSSL in base.
+ever sees a file descriptor.  It uses the OpenSSL in base.  Once the
+handshake is done the helper limits its two sockets to read, write
+and poll, points stdio at /dev/null, and enters Capsicum capability
+mode (ps shows state C).
+
+Secrets
+-------
+
+The model must never see the API key.  kraft blanks the key's
+environment variables, in place and then with unsetenv(), as soon as
+it has built its headers, so commands do not inherit them and
+procstat -e shows nothing.  path_secret() keeps the file tools out of
+~/.kraft, grep and find_files skip it, and perm_auto() never lets a
+command that mentions .kraft run without asking.

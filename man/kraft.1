@@ -176,6 +176,15 @@ Use this only where the model can do no harm, such as a scratch jail.
 .Pp
 Without a terminal to ask on, calls that would be asked about are
 refused.
+.Pp
+Whatever the mode, the model cannot use the tools to read or change
+anything in
+.Pa ~/.kraft ,
+where the API key and saved sessions live, and the API key is taken
+out of the environment before any command runs.
+Commands also run with limits: an hour of CPU time per process, files
+of at most 4 GB, at most 2048 processes for the user, and no core
+dumps.
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.

@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <string.h>
+#include "path.h"
 #include "proc.h"
 #include "stralloc.h"
 #include "tool.h"
@@ -24,6 +25,13 @@ tool_grep(const char *in, size_t n, stralloc *out)
   argv[i++] = "/usr/bin/grep";
   argv[i++] = "-rnIE";
   argv[i++] = "--exclude-dir=.git";
+  argv[i++] = "--exclude-dir=.kraft";  /* kraft's keys and sessions */
+  if (path_secret(dir.s)) {
+    stralloc_copys(out, "refused: ");
+    stralloc_cats(out, dir.s);
+    stralloc_cats(out, " is one of kraft's private files");
+    goto out;
+  }
   if (tool_arg(in, n, "glob", &g) && g.len) {
     if (!stralloc_copys(&glob, "--include=") || !stralloc_cats(&glob, g.s) ||
         !stralloc_0(&glob))

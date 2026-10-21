@@ -2,6 +2,7 @@
 #include <string.h>
 #include "byte.h"
 #include "file.h"
+#include "path.h"
 #include "stralloc.h"
 #include "tool.h"
 
@@ -40,6 +41,12 @@ tool_edit(const char *in, size_t n, stralloc *out)
   }
   if (old.len == new.len && !byte_diff(old.s, old.len, new.s)) {
     stralloc_copys(out, "old_string and new_string are the same");
+    goto out;
+  }
+  if (path_secret(path.s)) {
+    stralloc_copys(out, "refused: ");
+    stralloc_cats(out, path.s);
+    stralloc_cats(out, " is one of kraft's private files");
     goto out;
   }
   if (!file_get(path.s, &f)) {

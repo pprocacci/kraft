@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -9,6 +10,35 @@
 #include <unistd.h>
 #include "proc.h"
 #include "stralloc.h"
+
+/*
+ * limits for what the model runs, generous enough for big builds:
+ * CPU seconds per process, the largest file it may write, the user's
+ * processes (bounding a fork bomb), and no core dumps.  a limit is
+ * only ever lowered.
+ */
+static const struct { int res; rlim_t max; } limits[] = {
+  { RLIMIT_CPU, 3600 },
+  { RLIMIT_FSIZE, (rlim_t)4 << 30 },
+  { RLIMIT_NPROC, 2048 },
+  { RLIMIT_CORE, 0 },
+};
+
+static void
+limit(void)
+{
+  struct rlimit rl;
+  size_t i;
+
+  for (i = 0; i < sizeof limits / sizeof limits[0]; ++i) {
+    if (getrlimit(limits[i].res, &rl) == -1) continue;
+    if (rl.rlim_cur == RLIM_INFINITY || rl.rlim_cur > limits[i].max)
+      rl.rlim_cur = limits[i].max;
+    if (rl.rlim_max == RLIM_INFINITY || rl.rlim_max > limits[i].max)
+      rl.rlim_max = limits[i].max;
+    setrlimit(limits[i].res, &rl);
+  }
+}
 
 static long
 msleft(const struct timespec *end)
@@ -24,7 +54,7 @@ msleft(const struct timespec *end)
  * runs argv[0] (a full path) with stdin from /dev/null and stdout
  * and stderr captured into out, keeping at most cap bytes.  the
  * program gets its own process group, which is killed if it runs
- * longer than secs seconds.  *status is the exit code, 128 plus the
+ * longer than secs seconds, and the resource limits above.  *status is the exit code, 128 plus the
  * signal number if it was killed by a signal, or -1 if it timed out.
  * returns 1 if it ran, 0 with errno set if it could not be started.
  */
@@ -55,6 +85,7 @@ proc_run(char *const *argv, unsigned long secs, size_t cap, stralloc *out,
     if (fd != -1) dup2(fd, 0);
     dup2(p[1], 1);
     dup2(p[1], 2);
+    limit();
     execv(argv[0], argv);
     _exit(127);
   }

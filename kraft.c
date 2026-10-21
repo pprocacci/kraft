@@ -190,6 +190,21 @@ warnsys(const char *a, const char *b)
   warn(a, tmp.s, 0);
 }
 
+/*
+ * removes a variable from the environment that commands inherit, and
+ * blanks its value where it came in: unsetenv() alone leaves the
+ * original strings, which procstat -e and ps e show any process of
+ * the same user
+ */
+static void
+forget(const char *name)
+{
+  char *v = getenv(name);
+
+  if (v) memset(v, 0, strlen(v));
+  unsetenv(name);
+}
+
 static const char *
 env(const char *name, const char *dflt)
 {
@@ -1251,6 +1266,11 @@ main(int argc, char **argv)
       nomem();
   }
   if (!stralloc_0(&hdrs) || !stralloc_0(&ghdrs)) nomem();
+  /* the key is in the headers now; keep it from the model's commands */
+  forget("KRAFT_API_KEY");
+  forget("ANTHROPIC_API_KEY");
+  forget("ANTHROPIC_AUTH_TOKEN");
+  forget("OPENAI_API_KEY");
   mksystem();
   if (!ctxwin) findwindow();
   if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||

@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/capsicum.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <errno.h>
@@ -42,6 +43,36 @@ fail(int st, const char *what)
 }
 
 /*
+ * after the handshake the helper needs nothing but its two sockets,
+ * so it gives up everything else: stdio goes to /dev/null, the
+ * sockets may only be read, written and polled, and it enters
+ * Capsicum capability mode, where it can open nothing new.  a kernel
+ * without Capsicum just leaves it as it was.
+ */
+static void
+sandbox(int net, int s)
+{
+  cap_rights_t rights;
+  int fd;
+
+  fd = open("/dev/null", O_RDWR);
+  if (fd != -1) {
+    dup2(fd, 0);
+    dup2(fd, 1);
+    dup2(fd, 2);
+    if (fd > 2) close(fd);
+  }
+  cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_EVENT);
+  cap_rights_limit(net, &rights);
+  cap_rights_limit(s, &rights);
+  cap_rights_init(&rights);
+  cap_rights_limit(0, &rights);
+  cap_rights_limit(1, &rights);
+  cap_rights_limit(2, &rights);
+  cap_enter();
+}
+
+/*
  * runs in the helper: the handshake, whose outcome goes to the parent
  * on st ("+" or the reason), then relaying bytes until either side
  * ends
@@ -75,6 +106,7 @@ helper(int net, int s, int st, const char *host)
   alarm(0);
   allwrite(st, "+", 1);
   close(st);
+  sandbox(net, s);
 
   p[0].fd = net;
   p[0].events = POLLIN;
