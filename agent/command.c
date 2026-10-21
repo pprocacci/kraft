@@ -6,6 +6,9 @@ help(void)
   outs("Type a task and press return. Commands:\n"
       "  /clear    forget the conversation\n"
       "  /compact  replace the conversation with a summary, to save space\n"
+      "  /init     have the model write a KRAFT.md describing the project\n"
+      "  /remember [-g] TEXT   add a note to KRAFT.md (-g: to\n"
+      "            ~/.kraft/KRAFT.md, for every project)\n"
       "  /effort   show or set how hard the model thinks: low, medium,\n"
       "            high, xhigh, max, or default\n"
       "  /mode     show or set when edits and commands need approval:\n"
@@ -109,6 +112,75 @@ showdiff(void)
   stralloc_free(&o);
 }
 
+static const char initprompt[] =
+    "Write a KRAFT.md for this project, in its top directory, for a coding "
+    "agent working on it later. Look around first: the README and other "
+    "documents, the build files, the layout of the source, the tests, and "
+    "the style of the code and of the commit messages. Then write down, "
+    "briefly, what is not obvious from a quick look: how to build, test and "
+    "run it; how the code is organised; the conventions it follows; and "
+    "anything that is easy to get wrong. Keep it short, a page or so, in "
+    "plain Markdown. If there is a KRAFT.md already, improve it rather than "
+    "starting again.";
+
+/*
+ * /remember [-g] text: a line for the model to keep, added to the
+ * project's KRAFT.md (or, with -g, ~/.kraft/KRAFT.md), and told to the
+ * model now, since the system prompt only changes in the next session.
+ */
+static void
+remember(const char *s)
+{
+  stralloc fn = STRALLOC_ZERO, l = STRALLOC_ZERO;
+  const char *home;
+  struct msg *m;
+  struct block *b;
+  int fd, global = 0;
+
+  while (*s == ' ') ++s;
+  if (str_start(s, "-g ")) {
+    global = 1;
+    for (s += 3; *s == ' '; ++s) ;
+  }
+  if (!*s) {
+    outs("(usage: /remember [-g] something to keep in mind)\n");
+    return;
+  }
+  if (global) {
+    if (!(home = env("HOME", 0)) || !sessdir(&fn)) return;  /* ~/.kraft */
+    fn.len -= str_len("/sessions");
+    if (!stralloc_cats(&fn, "/KRAFT.md")) nomem();
+  } else if (!stralloc_copys(&fn, "KRAFT.md")) nomem();
+  if (!stralloc_0(&fn) || !stralloc_copys(&l, "- ") || !stralloc_cats(&l, s) ||
+      !stralloc_cats(&l, "\n"))
+    nomem();
+  fd = open(fn.s, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+  if (fd == -1 || buffer_unixwrite(fd, l.s, l.len) != (ssize_t)l.len) {
+    kwarnsys("unable to add to ", fn.s);
+    if (fd != -1) close(fd);
+    goto out;
+  }
+  close(fd);
+  if (!(m = conv_msg(&conv, ROLE_USER)) || !(b = conv_block(m, BLK_TEXT)))
+    nomem();
+  if (!stralloc_copys(&b->text, "[The user asks you to keep this in mind from "
+      "now on; it has been added to ") || !stralloc_cats(&b->text, fn.s) ||
+      !stralloc_cats(&b->text, ": ") || !stralloc_cats(&b->text, s) ||
+      !stralloc_cats(&b->text, "]"))
+    nomem();
+  pending += b->text.len;
+  save();
+  sgr(DIM);
+  outs("(added to ");
+  outs(fn.s);
+  outs(")");
+  sgr(0);
+  outs("\n");
+out:
+  stralloc_free(&fn);
+  stralloc_free(&l);
+}
+
 /*
  * carries out line if it is one of the slash commands.  returns 1 if
  * it was, -1 if it was /exit, 0 if it is a task.
@@ -160,6 +232,17 @@ command(const char *line)
   if (!str_diff(line, "/undo")) {
     if (undo()) save();
     else outs("(nothing to undo)\n");
+    return 1;
+  }
+  if (!str_diff(line, "/init")) {
+    status = 0;
+    task(initprompt, str_len(initprompt));
+    nl();
+    flush();
+    return 1;
+  }
+  if (!str_diff(line, "/remember") || str_start(line, "/remember ")) {
+    remember(line + 9);
     return 1;
   }
   if (!str_diff(line, "/compact")) {

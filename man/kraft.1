@@ -412,6 +412,21 @@ At the prompt:
 .Bl -tag -width "/compact"
 .It Cm /clear
 Forget the conversation.
+.It Cm /init
+Have the model look around the project and write a
+.Pa KRAFT.md
+for it, or improve the one there is; the writing is subject to the
+permission mode.
+.It Cm /remember Oo Fl g Oc Ar text
+Add
+.Ar text
+as a line to the project's
+.Pa KRAFT.md ,
+or with
+.Fl g
+to
+.Pa ~/.kraft/KRAFT.md ,
+and tell the model now.
 .It Cm /compact
 Replace the conversation with a summary of it, to save space.
 .It Cm /undo
@@ -521,9 +536,18 @@ Settings and permission rules; see
 .Sx CONFIGURATION .
 .It Pa ~/.kraft/trusted
 The project config files you have trusted, with a hash of each.
+.It Pa ~/.kraft/KRAFT.md
+Instructions for every project, given to the model first.
 .It Pa KRAFT.md
-Project instructions, read from the current directory and given to
-the model.
+Project instructions, given to the model: those in the current
+directory and in each directory above it, up to the top of the git
+repository (or to just below
+.Ev HOME ) ,
+the outermost first.
+.Cm /init
+writes one;
+.Cm /remember
+adds to one.
 .El
 .Sh EXIT STATUS
 .Nm

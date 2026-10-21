@@ -56,11 +56,7 @@ mksystem(void)
       "This is a plain terminal, so keep replies short and avoid Markdown "
       "tables. When a task is done, say briefly what you changed."))
     nomem();
-  if (file_get("KRAFT.md", &md) && md.len) {
-    if (!stralloc_cats(&sys, "\n\nProject instructions from KRAFT.md:\n\n") ||
-        !stralloc_catb(&sys, md.s, md.len))
-      nomem();
-  }
+  memory(&sys);
   stralloc_free(&md);
   gitcontext(&sys);
   if (!stralloc_0(&sys)) nomem();

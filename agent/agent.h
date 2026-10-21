@@ -49,14 +49,6 @@
 #include "url.h"
 #ifndef KRAFT_VERSION
 #define KRAFT_VERSION "unknown"
-char **options(int argc, char **argv, int *resumeit);
-void setconnection(void);
-void settools(void);
-int command(const char *line);
-void repl(void);
-void findwindow(void);
-void newsession(void);
-
 #endif
 #define FATAL "kraft: fatal: "
 #define USAGE "kraft: usage: kraft [-rtwy] [-a anthropic|openai] [-c tokens] " \
@@ -220,5 +212,6 @@ int command(const char *line);
 void repl(void);
 void findwindow(void);
 void newsession(void);
+void memory(stralloc *s);
 
 #endif
