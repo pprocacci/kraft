@@ -9,7 +9,8 @@ CC?=		cc
 AR?=		ar
 CFLAGS?=	-O2 -pipe
 CFLAGS+=	-Wall -Wextra -Iinclude
-INSTALL?=	install
+INSTALL_PROGRAM?=	install -m 555
+INSTALL_MAN?=	install -m 444
 
 VERSION!=	cat VERSION
 LIBSRCS!=	echo src/*.c
@@ -42,9 +43,9 @@ test: ${TESTS}
 	./t/sse
 
 install: kraft
-	${INSTALL} -d ${DESTDIR}${BINDIR} ${DESTDIR}${MANDIR}/man1
-	${INSTALL} -m 555 kraft ${DESTDIR}${BINDIR}/kraft
-	${INSTALL} -m 444 man/kraft.1 ${DESTDIR}${MANDIR}/man1/kraft.1
+	mkdir -p ${DESTDIR}${BINDIR} ${DESTDIR}${MANDIR}/man1
+	${INSTALL_PROGRAM} kraft ${DESTDIR}${BINDIR}/kraft
+	${INSTALL_MAN} man/kraft.1 ${DESTDIR}${MANDIR}/man1/kraft.1
 
 dist:
 	git archive --prefix=kraft-${VERSION}/ -o kraft-${VERSION}.tar.gz HEAD
