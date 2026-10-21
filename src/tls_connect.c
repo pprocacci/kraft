@@ -2,16 +2,18 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include "buffer.h"
-#include "strerr.h"
+#include "str.h"
+#include "stralloc.h"
 #include "tls.h"
 
-#define FATAL "kraft: fatal: "
+#define HANDSHAKE 30  /* seconds */
 
 static int
 allwrite(int fd, const char *s, size_t n)
@@ -27,44 +29,52 @@ allwrite(int fd, const char *s, size_t n)
   return 1;
 }
 
+/* in the helper: tells the parent why, and gives up */
 static void
-fail(const char *what)
+fail(int st, const char *what)
 {
   char e[256];
 
   ERR_error_string_n(ERR_get_error(), e, sizeof e);
-  strerr_die(111, FATAL, what, e);
+  allwrite(st, what, str_len(what));
+  allwrite(st, e, str_len(e));
+  _exit(111);
 }
 
-/* runs in the helper: handshake, then pump bytes until either side ends */
+/*
+ * runs in the helper: the handshake, whose outcome goes to the parent
+ * on st ("+" or the reason), then relaying bytes until either side
+ * ends
+ */
 static void
-helper(int net, int s, const char *host)
+helper(int net, int s, int st, const char *host)
 {
   SSL_CTX *ctx;
   SSL *ssl;
   struct pollfd p[2];
-  char buf[16384], e[256];
+  char buf[16384];
   ssize_t r;
   int n;
 
   /* the parent decides when to stop, by closing its end */
   signal(SIGINT, SIG_IGN);
   signal(SIGQUIT, SIG_IGN);
-  if (!(ctx = SSL_CTX_new(TLS_client_method()))) fail("TLS setup failed: ");
+  signal(SIGALRM, SIG_DFL);
+  alarm(HANDSHAKE);
+  if (!(ctx = SSL_CTX_new(TLS_client_method())))
+    fail(st, "TLS setup failed: ");
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
   if (!SSL_CTX_set_default_verify_paths(ctx))
-    fail("unable to load CA certificates: ");
+    fail(st, "unable to load CA certificates: ");
   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, 0);
-  if (!(ssl = SSL_new(ctx))) fail("TLS setup failed: ");
+  if (!(ssl = SSL_new(ctx))) fail(st, "TLS setup failed: ");
   SSL_set_fd(ssl, net);
   SSL_set_tlsext_host_name(ssl, host);
-  if (!SSL_set1_host(ssl, host)) fail("TLS setup failed: ");
-  if (SSL_connect(ssl) != 1) {
-    ERR_error_string_n(ERR_get_error(), e, sizeof e);
-    buffer_puts(buffer_2, FATAL "TLS handshake with ");
-    buffer_puts(buffer_2, host);
-    strerr_die(111, " failed: ", e, 0);
-  }
+  if (!SSL_set1_host(ssl, host)) fail(st, "TLS setup failed: ");
+  if (SSL_connect(ssl) != 1) fail(st, "TLS handshake failed: ");
+  alarm(0);
+  allwrite(st, "+", 1);
+  close(st);
 
   p[0].fd = net;
   p[0].events = POLLIN;
@@ -100,31 +110,58 @@ helper(int net, int s, const char *host)
  * wraps the connected socket net in TLS, verifying that the server's
  * certificate is valid for host.  the TLS session lives in a helper
  * process; the caller gets a plain socket to read and write instead.
- * net is closed in the caller.  returns the new socket, or -1.
+ * net is closed in the caller.  returns the new socket once the
+ * handshake is done, or -1 with errno set; if the handshake failed,
+ * why holds the reason (and errno is ECONNABORTED).
  */
 int
-tls_connect(int net, const char *host)
+tls_connect(int net, const char *host, stralloc *why)
 {
-  int pair[2];
+  char buf[512];
+  int pair[2], st[2], status;
+  ssize_t r;
   pid_t pid;
-  int status;
 
+  if (!stralloc_copys(why, "")) return -1;
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) == -1)
     return -1;
+  if (pipe2(st, O_CLOEXEC) == -1) {
+    close(pair[0]);
+    close(pair[1]);
+    return -1;
+  }
   pid = fork();
   if (pid == -1) {
     close(pair[0]);
     close(pair[1]);
+    close(st[0]);
+    close(st[1]);
     return -1;
   }
   if (pid == 0) {
     /* fork again so the helper is not our child to reap */
     close(pair[0]);
+    close(st[0]);
     if (fork() != 0) _exit(0);
-    helper(net, pair[1], host);
+    helper(net, pair[1], st[1], host);
   }
   close(pair[1]);
+  close(st[1]);
   close(net);
   while (waitpid(pid, &status, 0) == -1 && errno == EINTR) ;
-  return pair[0];
+
+  /* the handshake's outcome; ^C interrupts the wait */
+  while ((r = read(st[0], buf, sizeof buf)) > 0)
+    if (!stralloc_catb(why, buf, (size_t)r)) break;
+  close(st[0]);
+  if (why->len == 1 && why->s[0] == '+') {
+    why->len = 0;
+    return pair[0];
+  }
+  close(pair[0]);
+  if (r == -1) return -1;  /* EINTR */
+  if (!why->len) stralloc_copys(why, "TLS handshake timed out");
+  stralloc_0(why);
+  errno = ECONNABORTED;
+  return -1;
 }

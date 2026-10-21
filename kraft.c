@@ -42,6 +42,7 @@
     "[-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
+#define CONNECTSECS 15  /* to give up connecting to the server */
 
 /* permission modes: when edits and commands need the user's approval */
 #define MODE_ASK 0    /* always */
@@ -73,7 +74,7 @@ static struct conv conv;
 static struct http http;
 static struct sse sse;
 static struct reply reply;
-static stralloc host, path, hdrs, sys, body, event, data, line, tmp;
+static stralloc host, path, hdrs, sys, body, event, data, line, tmp, tlswhy;
 static struct conv cconv;      /* the auto-mode check's own conversation */
 static stralloc rwhy, cwhy;    /* why the rules, and the check, said no */
 static const struct usage nousage;
@@ -355,15 +356,21 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   if (!api->render(&body, &q)) nomem();
   if (intr) return -1;
 
-  fd = tcp_connect(url.host.s, url.port.s);
+  fd = tcp_connect(url.host.s, url.port.s, CONNECTSECS);
   if (fd == -1) {
     if (intr) return -1;
     warnsys("unable to connect to ", base);
     goto fail;
   }
-  if (url.tls && (fd = tls_connect(fd, url.host.s)) == -1) {
+  if (url.tls && (fd = tls_connect(fd, url.host.s, &tlswhy)) == -1) {
     if (intr) return -1;
-    warnsys("unable to start TLS with ", base);
+    if (!tlswhy.len) warnsys("unable to start TLS with ", base);
+    else {
+      if (!stralloc_copys(&tmp, base) || !stralloc_cats(&tmp, ": ") ||
+          !stralloc_cats(&tmp, tlswhy.s) || !stralloc_0(&tmp))
+        nomem();
+      warn("unable to start TLS with ", tmp.s, 0);
+    }
     goto fail;
   }
   curfd = fd;
@@ -466,9 +473,9 @@ getjson(const char *p, stralloc *out)
   ssize_t n = -1;
   int fd;
 
-  fd = tcp_connect(url.host.s, url.port.s);
+  fd = tcp_connect(url.host.s, url.port.s, CONNECTSECS);
   if (fd == -1) return 0;
-  if (url.tls && (fd = tls_connect(fd, url.host.s)) == -1) return 0;
+  if (url.tls && (fd = tls_connect(fd, url.host.s, &tlswhy)) == -1) return 0;
   curfd = fd;
   if (http_request(fd, "GET", host.s, p, ghdrs.s, 0, 0) &&
       http_response(&http, fd) > 0 && http.status == 200) {
