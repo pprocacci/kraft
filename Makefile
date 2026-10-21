@@ -18,18 +18,21 @@ VERSION!=	cat VERSION
 LIBSRCS!=	echo src/*.c
 HDRS!=		echo include/*.h
 LIBOBJS=	${LIBSRCS:.c=.o}
+AGENTSRCS!=	echo agent/*.c
+AGENTOBJS=	${AGENTSRCS:.c=.o}
 TESTS=		t/json t/sse t/conv t/perm
 
 all: kraft
 
-kraft: kraft.o libkraft.a
-	${CC} ${LDFLAGS} -o kraft kraft.o libkraft.a ${LDLIBS}
+kraft: kraft.o ${AGENTOBJS} libkraft.a
+	${CC} ${LDFLAGS} -o kraft kraft.o ${AGENTOBJS} libkraft.a ${LDLIBS}
 
 libkraft.a: ${LIBOBJS}
 	rm -f libkraft.a
 	${AR} rcs libkraft.a ${LIBOBJS}
 
-${LIBOBJS} kraft.o: ${HDRS}
+${LIBOBJS} ${AGENTOBJS} kraft.o: ${HDRS}
+${AGENTOBJS} kraft.o: agent/agent.h
 
 kraft.o: kraft.c VERSION
 	${CC} ${CFLAGS} -DKRAFT_VERSION=\"${VERSION}\" -c kraft.c -o kraft.o
@@ -64,6 +67,7 @@ dist:
 	git archive --prefix=kraft-${VERSION}/ -o kraft-${VERSION}.tar.gz HEAD
 
 clean:
-	rm -f kraft kraft.o libkraft.a ${LIBOBJS} ${TESTS} kraft-*.tar.gz
+	rm -f kraft kraft.o libkraft.a ${LIBOBJS} ${AGENTOBJS} ${TESTS} \
+	    kraft-*.tar.gz
 
 .PHONY: all test install dist clean

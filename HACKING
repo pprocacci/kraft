@@ -28,16 +28,40 @@ Rules of the road
 Layout
 ------
 
-  kraft.c     the kraft program
+  kraft.c     main(): options, setup, and the prompt loop
+  agent/      the rest of the program, one exported function per file
+  agent/agent.h   its shared state and functions
+  agent/state.c   that state (data only: no functions)
   src/        the library, one function per file
-  include/    the headers
+  include/    the library's headers
   t/          tests; run them with make test
   man/        manual pages
+
+The library (src/) knows nothing of the program's state: everything
+it needs comes in as arguments.  The program (agent/) shares state
+through agent.h; a helper used by only one function, and short, is
+static in that function's file.  Program functions that would clash
+with libc's names are prefixed, as with kwarn() for warn(3).
+
+The main pieces of agent/:
+
+  task, work     a task: the user's words, then model and tools in turn
+  exchange       one request to the model, with retries (attempt)
+  runtools       running the model's tool calls; approve, check (the
+                 auto-mode model check), ruled and saverule (the rules)
+  subagent       the task tool
+  compact        replacing the conversation with a summary
+  attach         images and PDFs
+  save, resume, sessdir        sessions
+  setundo, undo                /undo
+  loadconfigs, setting, trust  config files and trusted projects
+  mksystem       the system prompt, git context included
+  out, raw, sgr, lines, announce, spin, ...   the terminal
 
 How it fits together
 --------------------
 
-kraft.c runs the agent loop: the user's task goes into the
+task() runs the agent loop: the user's task goes into the
 conversation (conv_*), the backend renders the conversation into a
 request, the reply streams back over HTTP (http_*, tls_*) as
 server-sent events (sse_*), and the backend's event function builds
