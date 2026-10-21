@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <histedit.h>
@@ -38,7 +39,8 @@ plain(stralloc *line)
 /*
  * reads one line of input, without its newline and NUL-terminated
  * (the NUL not counted).  uses libedit, with history, when stdin is
- * a terminal.  returns 1 for a line, 0 at end of input.
+ * a terminal.  returns 1 for a line, 0 at end of input, -1 if the
+ * user interrupted the line with ^C.
  */
 int
 ui_readline(stralloc *line, const char *p)
@@ -62,8 +64,15 @@ ui_readline(stralloc *line, const char *p)
       el_source(el, 0);
     }
     buffer_flush(buffer_1);
+    errno = 0;
     s = el_gets(el, &n);
-    if (!s || n <= 0) return 0;
+    if (!s || n <= 0) {
+      if (errno == EINTR) {
+        el_reset(el);
+        return -1;
+      }
+      return 0;
+    }
     if (!stralloc_copyb(line, s, (size_t)n)) return 0;
     while (line->len && (line->s[line->len - 1] == '\n' ||
         line->s[line->len - 1] == '\r'))

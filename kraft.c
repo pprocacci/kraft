@@ -1,3 +1,5 @@
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/utsname.h>
 #include <errno.h>
 #include <limits.h>
@@ -14,6 +16,7 @@
 #include "http.h"
 #include "json.h"
 #include "oai.h"
+#include "proc.h"
 #include "scan.h"
 #include "sse.h"
 #include "str.h"
@@ -45,6 +48,8 @@ static const struct api *api;
 static const char *model, *base;
 static unsigned long max = 16384;
 static int showthink, yes, status;
+static volatile sig_atomic_t intr;     /* ^C count during this task */
+static volatile sig_atomic_t curfd = -1;  /* the connection being read */
 static int allowed[32];  /* by tool index: approved for the session */
 static char last = '\n';  /* last byte written to stdout */
 
@@ -54,6 +59,23 @@ static struct http http;
 static struct sse sse;
 static struct reply reply;
 static stralloc host, path, hdrs, sys, body, event, data, line, tmp;
+
+/*
+ * ^C: stop the reply by shutting its connection down, or stop the
+ * running command (a second ^C kills it outright).  only
+ * async-signal-safe calls here.
+ */
+static void
+onint(int sig)
+{
+  int e = errno;
+
+  (void)sig;
+  if (intr < 2) ++intr;
+  if (curfd != -1) shutdown(curfd, SHUT_RDWR);
+  if (proc_pid > 0) kill(-proc_pid, intr > 1 ? SIGKILL : SIGINT);
+  errno = e;
+}
 
 static void
 nomem(void)
@@ -211,10 +233,40 @@ slurp(void)
 }
 
 /*
+ * after an interrupted reply, keeps only its text: a tool call or a
+ * thinking block cut off part way would make the conversation invalid.
+ */
+static void
+keeptext(void)
+{
+  struct msg *m;
+  struct block *b;
+  size_t i, j;
+
+  if (!conv.n || conv.m[conv.n - 1].role != ROLE_ASSISTANT) return;
+  m = &conv.m[conv.n - 1];
+  for (i = j = 0; i < m->n; ++i) {
+    b = &m->b[i];
+    if (b->type == BLK_TEXT && b->text.len) {
+      if (i != j) m->b[j] = *b;
+      ++j;
+    } else {
+      stralloc_free(&b->id);
+      stralloc_free(&b->name);
+      stralloc_free(&b->text);
+      stralloc_free(&b->aux);
+    }
+  }
+  m->n = j;
+  if (!j) conv_drop(&conv);
+}
+
+/*
  * sends the conversation and streams the reply into a new assistant
  * message, printing it as it arrives.  returns 1 on success.  on
  * failure the partial reply is dropped, so the conversation stays
- * valid, and 0 is returned.
+ * valid, and 0 is returned.  if the user interrupts, whatever text
+ * arrived is kept and -1 is returned.
  */
 static int
 request(void)
@@ -229,19 +281,29 @@ request(void)
   q.tools = tool_all;
   q.conv = &conv;
   if (!api->render(&body, &q)) nomem();
+  if (intr) return -1;
 
   fd = tcp_connect(url.host.s, url.port.s);
-  if (fd == -1) { warnsys("unable to connect to ", base); goto fail; }
+  if (fd == -1) {
+    if (intr) return -1;
+    warnsys("unable to connect to ", base);
+    goto fail;
+  }
   if (url.tls && (fd = tls_connect(fd, url.host.s)) == -1) {
+    if (intr) return -1;
     warnsys("unable to start TLS with ", base);
     goto fail;
   }
+  curfd = fd;
+  if (intr) goto stopped;  /* ^C came before the handler knew fd */
   if (!http_request(fd, "POST", host.s, path.s, hdrs.s, body.s, body.len)) {
+    if (intr) goto stopped;
     warnsys("unable to send request to ", base);
     goto failfd;
   }
   r = http_response(&http, fd);
   if (r <= 0) {
+    if (intr) goto stopped;
     if (r < 0) warnsys("unable to read response from ", base);
     else warn("malformed response from ", base, 0);
     goto failfd;
@@ -252,8 +314,10 @@ request(void)
         !stralloc_catulong(&tmp, (unsigned long)http.status) ||
         !stralloc_cats(&tmp, ": ") || !stralloc_0(&tmp))
       nomem();
-    warn("HTTP ", tmp.s, body.s);
+    curfd = -1;
     close(fd);
+    if (intr) { warn("interrupted", 0, 0); return -1; }
+    warn("HTTP ", tmp.s, body.s);
     status = http.status < 500 ? 100 : 111;
     return 0;
   }
@@ -264,8 +328,15 @@ request(void)
   reply.stop = STOP_NONE;
   for (;;) {
     r = sse_get(&sse, &http, &event, &data);
-    if (r < 0) { warnsys("unable to read stream from ", base); goto drop; }
-    if (r == 0) break;
+    if (r < 0) {
+      if (intr) goto cut;
+      warnsys("unable to read stream from ", base);
+      goto drop;
+    }
+    if (r == 0) {
+      if (intr) goto cut;  /* the handler shut the socket down */
+      break;
+    }
     if (!stralloc_copys(&reply.text, "") || !stralloc_copys(&reply.think, "") ||
         !stralloc_copys(&reply.err, ""))
       nomem();
@@ -285,14 +356,23 @@ request(void)
     }
     if (r == API_DONE) break;
   }
+  curfd = -1;
   close(fd);
   nl();
   flush();
   return 1;
 
+cut:
+  keeptext();
+stopped:
+  curfd = -1;
+  close(fd);
+  warn("interrupted", 0, 0);
+  return -1;
 drop:
   conv_drop(&conv);
 failfd:
+  curfd = -1;
   close(fd);
 fail:
   status = 111;
@@ -387,9 +467,11 @@ approve(const struct tool *t, const char *in, size_t n)
 /*
  * runs the tool calls in the last assistant message and puts their
  * results in a new user message.  if cut is set the reply was
- * truncated, so the calls are answered with errors instead.
+ * truncated, so the calls are answered with errors instead.  every
+ * call gets a result, even after an interrupt, as the APIs require.
+ * returns 0 if the user interrupted.
  */
-static void
+static int
 runtools(int cut)
 {
   const struct tool *t;
@@ -411,9 +493,13 @@ runtools(int cut)
       if (str_len(t->name) == b->name.len &&
           !byte_diff(t->name, b->name.len, b->name.s))
         break;
-    announce(b, in, n);
 
     res->iserr = 1;
+    if (intr) {
+      stralloc_copys(&res->text, "not run: the user interrupted");
+      continue;
+    }
+    announce(b, in, n);
     if (cut)
       stralloc_copys(&res->text, "not run: the reply was cut off before "
           "this call was complete");
@@ -422,13 +508,35 @@ runtools(int cut)
     else if (!json_object(in, n))
       stralloc_copys(&res->text, "the input was not a valid JSON object");
     else if (!approve(t, in, n))
-      stralloc_copys(&res->text, "the user declined this call; ask them "
-          "what to do instead");
-    else
+      stralloc_copys(&res->text, intr ? "not run: the user interrupted" :
+          "the user declined this call; ask them what to do instead");
+    else {
       res->iserr = !t->run(in, n, &res->text);
+      if (intr) {
+        stralloc_cats(&res->text, "\n[interrupted by the user]");
+        res->iserr = 1;
+      }
+    }
     lines(res->iserr ? "  ! " : "  | ", res->text.s, res->text.len, 4);
     flush();
   }
+  if (intr) warn("interrupted", 0, 0);
+  return !intr;
+}
+
+/* tells the model, in the user's next turn, that it was cut short */
+static void
+interrupted(void)
+{
+  struct msg *m;
+  struct block *b;
+
+  if (!(m = conv_msg(&conv, ROLE_USER))) nomem();
+  if (!(b = conv_block(m, BLK_TEXT))) nomem();
+  if (!stralloc_copys(&b->text, "[The user interrupted. Stop what you were "
+      "doing and wait for their next message.]"))
+    nomem();
+  status = 130;
 }
 
 /* carries out one task: the user's words, then model and tools in turn */
@@ -437,14 +545,17 @@ task(const char *s, size_t n)
 {
   struct msg *m;
   struct block *b;
-  int step;
+  int step, r;
 
+  intr = 0;
   if (!(m = conv_msg(&conv, ROLE_USER))) nomem();
   if (!(b = conv_block(m, BLK_TEXT))) nomem();
   if (!stralloc_copyb(&b->text, s, n)) nomem();
 
   for (step = 0; step < MAXSTEPS; ++step) {
-    if (!request()) return;
+    r = request();
+    if (r < 0) { interrupted(); return; }
+    if (!r) return;
     m = &conv.m[conv.n - 1];
     if (reply.stop == STOP_REFUSAL) warn("the model declined this request", 0, 0);
     if (!hastools(m)) {
@@ -452,7 +563,7 @@ task(const char *s, size_t n)
         warn("the reply was cut off at max_tokens; raise it with -n", 0, 0);
       return;
     }
-    runtools(reply.stop == STOP_MAX);
+    if (!runtools(reply.stop == STOP_MAX)) { interrupted(); return; }
     if (reply.stop == STOP_MAX) {
       warn("the reply was cut off at max_tokens; raise it with -n", 0, 0);
       return;
@@ -476,8 +587,14 @@ main(int argc, char **argv)
   const char *aname, *key;
   int opt;
   size_t i;
+  struct sigaction sa;
+  int r;
 
   signal(SIGPIPE, SIG_IGN);
+  sa.sa_handler = onint;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;  /* no SA_RESTART: blocked calls must return EINTR */
+  sigaction(SIGINT, &sa, 0);
   aname = env("KRAFT_API", "anthropic");
   model = env("KRAFT_MODEL", 0);
   base = env("KRAFT_URL", "http://127.0.0.1:1234");
@@ -551,7 +668,12 @@ main(int argc, char **argv)
     outs(base);
     outs(". /help for help.\n");
   }
-  while (ui_readline(&line, "> ")) {
+  while ((r = ui_readline(&line, "> "))) {
+    if (r < 0) {  /* ^C at the prompt: start a fresh line */
+      intr = 0;
+      outs("\n");
+      continue;
+    }
     while (line.len && (line.s[line.len - 1] == ' ' ||
         line.s[line.len - 1] == '\t'))
       --line.len;

@@ -59,6 +59,7 @@ proc_run(char *const *argv, unsigned long secs, size_t cap, stralloc *out,
     _exit(127);
   }
   close(p[1]);
+  proc_pid = pid;
 
   clock_gettime(CLOCK_MONOTONIC, &end);
   end.tv_sec += (time_t)secs;
@@ -89,6 +90,7 @@ proc_run(char *const *argv, unsigned long secs, size_t cap, stralloc *out,
   }
   close(p[0]);
   while (waitpid(pid, &ws, 0) == -1 && errno == EINTR) ;
+  proc_pid = 0;
 
   if (dropped) {
     stralloc_cats(out, "\n[");

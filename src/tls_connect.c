@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <unistd.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -46,6 +47,9 @@ helper(int net, int s, const char *host)
   ssize_t r;
   int n;
 
+  /* the parent decides when to stop, by closing its end */
+  signal(SIGINT, SIG_IGN);
+  signal(SIGQUIT, SIG_IGN);
   if (!(ctx = SSL_CTX_new(TLS_client_method()))) fail("TLS setup failed: ");
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
   if (!SSL_CTX_set_default_verify_paths(ctx))

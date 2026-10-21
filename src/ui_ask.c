@@ -6,8 +6,8 @@
 
 /*
  * asks question q on the terminal and returns 'y', 'n' or 'a' (for
- * "always"); any other answer counts as 'n'.  returns 0 if there is
- * no terminal to ask on.
+ * "always"); any other answer, or an interrupt, counts as 'n'.
+ * returns 0 if there is no terminal to ask on.
  */
 int
 ui_ask(const char *q)
@@ -21,7 +21,8 @@ ui_ask(const char *q)
   fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
   if (fd == -1) return 0;
   buffer_unixwrite(fd, (char *)q, str_len(q));
-  r = buffer_unixread(fd, buf, sizeof buf);
+  r = read(fd, buf, sizeof buf);  /* not retried: ^C means no */
+  if (r == -1) buffer_unixwrite(fd, "\n", 1);
   close(fd);
   for (i = 0; r > 0 && i < (size_t)r; ++i)
     if (buf[i] != ' ' && buf[i] != '\t') { c = buf[i]; break; }
