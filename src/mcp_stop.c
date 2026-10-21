@@ -4,12 +4,16 @@
 #include <unistd.h>
 #include "mcp.h"
 
-/* closes m's stdin, which asks it to exit, and makes sure that it does */
+/*
+ * closes m's stdin, which asks it to exit, and makes sure that it
+ * does.  an HTTP server is just forgotten: its session times out.
+ */
 void
 mcp_stop(struct mcp *m)
 {
   int i;
 
+  m->up = 0;
   if (!m->pid) return;
   close(m->to);
   close(m->from);

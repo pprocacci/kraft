@@ -13,7 +13,7 @@ mcplist(void)
   for (k = 0; k < nmcps; ++k) {
     for (i = c = 0; i < nmcptools; ++i) c += mcptools[i].mcp == (int)k + 1;
     styled(BOLD, mcps[k].name);
-    outs(mcps[k].pid ? "  running, " : "  not running, ");
+    outs(mcps[k].up ? (mcps[k].http ? "  HTTP, " : "  running, ") : "  not running, ");
     if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, c) ||
         !stralloc_cats(&tmp, c == 1 ? " tool" : " tools") || !stralloc_0(&tmp))
       nomem();

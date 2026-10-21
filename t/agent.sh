@@ -8,6 +8,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kraft-t.XXXXXX") || exit 111
 P=$T/home/proj
 fails=0
 fpid=
+extra=
 
 trap '[ -n "$fpid" ] && kill $fpid 2>/dev/null; rm -rf "$T"' EXIT
 
@@ -27,7 +28,7 @@ run() {
 	i=0
 	while [ ! -s "$T/port" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
 	(cd "$P" && env -i PATH="$PATH" HOME="$T/home" TERM=dumb NO_COLOR=1 \
-	    KRAFT_API_KEY=test "$K" -u "http://127.0.0.1:$(cat "$T/port")" \
+	    KRAFT_API_KEY=test $extra "$K" -u "http://127.0.0.1:$(cat "$T/port")" \
 	    -m fake "$@" > "$T/out" 2> "$T/err")
 	status=$?
 	kill $fpid 2>/dev/null
@@ -261,6 +262,42 @@ echo "mcp broken exit 1" > "$T/home/.kraft/config"
 run -p "go"
 status 0
 err "MCP server broken"
+
+# the toy server on HTTP, for the next two
+"$top/t/mcpd" -h "$T/mport" &
+mpid=$!
+i=0
+while [ ! -s "$T/mport" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+murl="http://127.0.0.1:$(cat "$T/mport")/mcp"
+
+setup "MCP over HTTP, with a token from the environment" <<EOF
+reply
+tool mcp__web__echo {"text":"over the wire"}
+tool mcp__web__add_two {"a":1,"b":2}
+reply
+text Done.
+EOF
+printf 'mcp web %s\nmcp_header web Authorization: Bearer ${MCP_TOKEN}\n' \
+    "$murl" > "$T/home/.kraft/config"
+extra="MCP_TOKEN=sesame"
+run -P yes -p "go"
+extra=
+status 0
+noerr "MCP server"
+req 1 "mcp__web__fail"
+req 2 "over the wire"
+req 2 '"3'
+
+setup "MCP over HTTP without credentials" <<EOF
+reply
+text OK.
+EOF
+echo "mcp web $murl" > "$T/home/.kraft/config"
+run -p "go"
+status 0
+err "MCP server web"
+err "HTTP 401"
+kill $mpid 2>/dev/null
 
 if [ -x /usr/local/bin/uctags ]; then
 setup "symbols: definitions from ctags" <<EOF

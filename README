@@ -74,11 +74,13 @@ At an approval prompt: y yes, n no, a always this session, p always
 here (saved as a rule in .kraft/config).  ^C stops the reply or
 command in progress.
 
-MCP servers, one per line in the config, add their tools; every call
+MCP servers (commands, or URLs for remote ones) add their tools; every call
 is asked about unless a rule allows it:
 
   mcp fs npx -y @modelcontextprotocol/server-filesystem /home/me/notes
   allow mcp__fs__* *
+  mcp gh https://api.githubcopilot.com/mcp/
+  mcp_header gh Authorization: Bearer ${GITHUB_TOKEN}
 
 With devel/universal-ctags installed the model also gets a symbols
 tool, to find definitions without reading whole files.

@@ -378,9 +378,31 @@ and its tools are offered to the model as
 A project's config may name a server of the same name as yours, and
 replaces it.
 For example:
+If
+.Ar command
+is an
+.Li http
+or
+.Li https
+URL, the server is reached there instead, on MCP's streamable HTTP
+transport.
+.Cm mcp_header Ar name header
+adds a request header for it, after the
+.Cm mcp
+line; in it,
+.Li ${ Ns Ar VAR Ns Li }
+is replaced by the environment variable
+.Ar VAR ,
+so that a token need not be written in the file.
+A project's config that names a server of yours does not get your
+headers for it.
+OAuth is not supported; a server that needs it may accept a token
+made by hand.
+For example:
 .Bd -literal -offset indent
 mcp fs npx -y @modelcontextprotocol/server-filesystem /home/me/notes
-mcp gh env GITHUB_TOKEN=... github-mcp-server stdio
+mcp gh https://api.githubcopilot.com/mcp/
+mcp_header gh Authorization: Bearer ${GITHUB_TOKEN}
 .Ed
 .Pp
 As there is no knowing what another program's tools do, every call

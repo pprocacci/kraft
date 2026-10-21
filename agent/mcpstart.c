@@ -147,7 +147,7 @@ mcpstart(void)
         sgr(DIM);
         outs("  (");
         outs(why.s);
-        outs("; its stderr is in ~/.kraft/mcp-*.log)\n");
+        outs(mcps[k].http ? ")\n" : "; its stderr is in ~/.kraft/mcp-*.log)\n");
         sgr(0);
       }
     }

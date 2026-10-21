@@ -40,6 +40,43 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
     ++nrules;
     return 1;
   }
+  if (!str_diff(k, "mcp_header")) {
+    /* mcp_header NAME Header: value, with ${VAR} from the environment */
+    i = byte_chr(v, str_len(v), ' ');
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    for (u = 0; u < nmcps && str_diff(mcps[u].name, word.s); ++u) ;
+    if (u == nmcps) {
+      kwarn(tmp.s, "mcp_header for an MCP server not yet named: ", word.s);
+      return 1;
+    }
+    v += i;
+    i = byte_chr(v, str_len(v), ':');
+    if (!i || !v[i]) {
+      kwarn(tmp.s, "mcp_header needs a server and a header", 0);
+      return 1;
+    }
+    if (!stralloc_copys(&word, "")) nomem();
+    for (; *v; ++v) {
+      i = byte_chr(v, str_len(v), '}');
+      if (v[0] == '$' && v[1] == '{' && v[i]) {
+        if (!stralloc_copyb(&tmp, v + 2, i - 2) || !stralloc_0(&tmp)) nomem();
+        if (!env(tmp.s, 0)) {
+          kwarn("mcp_header: ", tmp.s, " is not set");
+          return 1;
+        }
+        if (!stralloc_cats(&word, env(tmp.s, 0))) nomem();
+        v += i;
+      } else if (!stralloc_append(&word, *v)) nomem();
+    }
+    /* one header line, whatever the environment held */
+    for (i = 0; i < word.len; ++i)
+      if (word.s[i] == '\r' || word.s[i] == '\n') word.s[i] = ' ';
+    if (!stralloc_cat(&mcps[u].hdrs, &word) ||
+        !stralloc_cats(&mcps[u].hdrs, "\r\n"))
+      nomem();
+    return 1;
+  }
   if (!str_diff(k, "mcp")) {
     /* mcp NAME COMMAND ... */
     i = byte_chr(v, str_len(v), ' ');
@@ -55,7 +92,9 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
       return 1;
     }
     if (u == nmcps) mcps[nmcps++].name = sdup(word.s);
-    mcps[u].cmd = sdup(v + i);  /* the project's may replace the user's */
+    /* the project's may replace the user's, but not take its headers */
+    mcps[u].cmd = sdup(v + i);
+    mcps[u].hdrs.len = 0;
     return 1;
   }
   if (!str_diff(k, "api")) cfgapi = sdup(v);
