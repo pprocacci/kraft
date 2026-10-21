@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "json.h"
+#include "md.h"
 #include "media.h"
 #include "stralloc.h"
 
@@ -68,6 +69,30 @@ main(void)
         !strcmp(media_type("\211PNG\r\n\032\nxxxx", 12), "image/png") &&
         !strcmp(media_type("%PDF-1.4", 8), "application/pdf") &&
         !media_type("hello, world", 12), "media types");
+  }
+
+  {
+    /* Markdown renders the same however the text is cut up */
+    static const char doc[] = "# Title\nsome **bold** and `x*y`, 2*3\n"
+        "```c\nint a; `q`\n```\nafter\n";
+    struct md m1 = MD_ZERO, m2 = MD_ZERO;
+    stralloc whole = STRALLOC_ZERO, bits = STRALLOC_ZERO;
+    size_t i;
+
+    md_put(&m1, &whole, doc, sizeof doc - 1);
+    md_end(&m1, &whole);
+    for (i = 0; i < sizeof doc - 1; ++i) md_put(&m2, &bits, doc + i, 1);
+    md_end(&m2, &bits);
+    stralloc_0(&whole);
+    check(whole.len == bits.len + 1 && !memcmp(whole.s, bits.s, bits.len),
+        "md: pieces render as the whole");
+    check(strstr(whole.s, "\033[1mTitle") && !strstr(whole.s, "# Title"),
+        "md: heading");
+    check(strstr(whole.s, "\033[1mbold\033[0m") != 0, "md: bold");
+    check(strstr(whole.s, "\033[36mx*y\033[0m") != 0, "md: code keeps its *");
+    check(strstr(whole.s, " 2*3") != 0, "md: lone star");
+    check(strstr(whole.s, "\033[36mint a; `q`") != 0, "md: fenced block");
+    check(strstr(whole.s, "after") != 0, "md: after the fence");
   }
 
   if (!fails) printf("json: ok\n");

@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #include "http.h"
 #include "job.h"
 #include "json.h"
+#include "md.h"
 #include "media.h"
 #include "oai.h"
 #include "path.h"
@@ -151,19 +153,58 @@ nomem(void)
   strerr_die(111, FATAL, "out of memory", 0);
 }
 
+/* writes without counting as text: for terminal escapes */
+static void
+raw(const char *s, size_t n)
+{
+  if (n && buffer_put(buffer_1, s, n) == -1)
+    strerr_sys(111, FATAL, "unable to write output", 0);
+}
+
 static void
 out(const char *s, size_t n)
 {
   if (!n) return;
   last = s[n - 1];
-  if (buffer_put(buffer_1, s, n) == -1)
-    strerr_sys(111, FATAL, "unable to write output", 0);
+  raw(s, n);
 }
 
 static void
 outs(const char *s)
 {
   out(s, str_len(s));
+}
+
+/*
+ * Colour, when stdout is a terminal and NO_COLOR is not set.  sgr()
+ * sets an attribute (as in "1;36"), sgr(0) puts things back.
+ */
+static int color;
+
+#define BOLD "1"
+#define DIM "2"
+#define RED "31"
+#define GREEN "32"
+#define YELLOW "33"
+#define CYAN "36"
+#define TOOLC "1;36"
+
+static void
+sgr(const char *code)
+{
+  if (!color) return;
+  raw("\033[", 2);
+  if (code) raw(code, str_len(code));
+  raw("m", 1);
+}
+
+/* the same, with s written in between */
+static void
+styled(const char *code, const char *s)
+{
+  sgr(code);
+  outs(s);
+  sgr(0);
 }
 
 static void
@@ -360,6 +401,62 @@ keeptext(struct conv *c)
   if (!j) conv_drop(c);
 }
 
+static struct md md = MD_ZERO;  /* the reply's Markdown, as it streams */
+static stralloc mdout;
+static struct timespec asked;   /* when the request went out */
+
+/* ends the reply's Markdown: whatever it held back, and plain text again */
+static void
+mdreset(void)
+{
+  if (!color) return;
+  if (!stralloc_copys(&mdout, "") || !md_end(&md, &mdout)) nomem();
+  raw(mdout.s, mdout.len);
+}
+
+/*
+ * waits for fd to have something to read, showing a spinner and the
+ * seconds since the request went out if that takes more than half a
+ * second.  the line is cleared again before returning.
+ */
+static void
+spin(int fd)
+{
+  static const char *const frames[] = {
+    "\342\240\213", "\342\240\231", "\342\240\271", "\342\240\270",
+    "\342\240\274", "\342\240\264", "\342\240\246", "\342\240\247",
+    "\342\240\207", "\342\240\217"
+  };
+  struct pollfd p;
+  struct timespec now;
+  unsigned long waited = 0, k = 0;
+  int shown = 0;
+
+  p.fd = fd;
+  p.events = POLLIN;
+  while (poll(&p, 1, 100) == 0) {
+    if ((waited += 100) < 500) continue;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (!stralloc_copys(&tmp, " thinking... ") ||
+        !stralloc_catulong(&tmp, (unsigned long)(now.tv_sec - asked.tv_sec)) ||
+        !stralloc_cats(&tmp, "s") || !stralloc_0(&tmp))
+      nomem();
+    raw("\r", 1);
+    sgr(CYAN);
+    raw(frames[k], str_len(frames[k]));
+    sgr(DIM);
+    raw(tmp.s, tmp.len - 1);
+    sgr(0);
+    flush();
+    k = (k + 1) % (sizeof frames / sizeof frames[0]);
+    shown = 1;
+  }
+  if (shown) {
+    raw("\r\033[K", 4);
+    flush();
+  }
+}
+
 /*
  * sends conversation c, with system prompt sysp and tools, to model
  * mdl, and streams the reply into a new assistant message, printing
@@ -409,6 +506,8 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
     warnsys("unable to send request to ", base);
     goto failfd;
   }
+  clock_gettime(CLOCK_MONOTONIC, &asked);
+  if (show && color && last == '\n') spin(fd);
   r = http_response(&http, fd);
   if (r <= 0) {
     if (intr) goto stopped;
@@ -440,6 +539,10 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   reply.stop = STOP_NONE;
   reply.u = nousage;
   for (;;) {
+    /* nothing to show yet: say so while waiting */
+    if (show && color && last == '\n' && sse.p == sse.n &&
+        http.b.p == http.b.n)
+      spin(fd);
     r = sse_get(&sse, &http, &event, &data);
     if (r < 0) {
       if (intr) goto cut;
@@ -455,14 +558,23 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
       nomem();
     r = api->event(m, data.s, data.len, &reply);
     if (show && showthink && reply.think.len) {
+      if (color) buffer_puts(buffer_2, "\033[2;3m");  /* dim italic */
       buffer_put(buffer_2, reply.think.s, reply.think.len);
+      if (color) buffer_puts(buffer_2, "\033[0m");
       buffer_flush(buffer_2);
     }
     if (show && reply.text.len) {
       /* a server tool's "\n* name(...)" line needs no blank line before it */
       i = last == '\n' && reply.text.len > 2 &&
           !byte_diff(reply.text.s, 3, "\n* ");
-      out(reply.text.s + i, reply.text.len - i);
+      if (color) {
+        if (!stralloc_copys(&mdout, "") ||
+            !md_put(&md, &mdout, reply.text.s + i, reply.text.len - i))
+          nomem();
+        raw(mdout.s, mdout.len);
+        if (reply.text.len > i) last = reply.text.s[reply.text.len - 1];
+      } else
+        out(reply.text.s + i, reply.text.len - i);
       flush();
     }
     if (r == API_ERROR) {
@@ -475,13 +587,17 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   curfd = -1;
   close(fd);
   tally(c == &conv);
-  if (show) nl();
+  if (show) {
+    mdreset();
+    nl();
+  }
   flush();
   return 1;
 
 cut:
   tally(c == &conv);
   keeptext(c);
+  if (show) mdreset();
 stopped:
   curfd = -1;
   close(fd);
@@ -791,25 +907,39 @@ static void
 lines(const char *p, const char *s, size_t n, unsigned long max)
 {
   unsigned long count = 0, more = 0;
+  const char *code, *q;
   size_t i, e;
 
+  /* the prefix says what the lines are */
+  for (q = p + str_len(p); q > p && (q[-1] == ' ' || q[-1] == '\t'); --q) ;
+  switch (q > p ? q[-1] : 0) {
+  case '|': code = DIM; break;
+  case '!': case '-': code = RED; break;
+  case '+': code = GREEN; break;
+  default: code = BOLD;
+  }
   for (i = 0; i < n; i = e + 1) {
     e = i + byte_chr(s + i, n - i, '\n');
     if (count == max) { ++more; continue; }
     ++count;
+    sgr(code);
     outs(p);
     out(s + i, e - i > 200 ? 200 : e - i);
     if (e - i > 200) outs("...");
+    sgr(0);
     outs("\n");
   }
   if (more) {
+    sgr(DIM);
     outs(p);
     outs("... (");
     if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, more) ||
         !stralloc_0(&tmp))
       nomem();
     outs(tmp.s);
-    outs(more == 1 ? " more line)\n" : " more lines)\n");
+    outs(more == 1 ? " more line)" : " more lines)");
+    sgr(0);
+    outs("\n");
   }
 }
 
@@ -824,8 +954,18 @@ announce(const char *prefix, const struct block *b, const char *in, size_t n)
   size_t i, k;
 
   nl();
-  outs(prefix);
-  out(b->name.s, b->name.len);
+  if (color) {
+    /* a dot for a call, an arrow for a sub-agent's */
+    sgr(*prefix == '*' ? CYAN : DIM);
+    outs(*prefix == '*' ? "\342\227\217 " : "  \342\206\263 ");
+    sgr(*prefix == '*' ? TOOLC : DIM);
+    out(b->name.s, b->name.len);
+    sgr(0);
+    if (*prefix != '*') sgr(DIM);
+  } else {
+    outs(prefix);
+    out(b->name.s, b->name.len);
+  }
   outs("(");
   for (i = 0; keys[i]; ++i)
     if (tool_arg(in, n, keys[i], &tmp)) break;
@@ -840,7 +980,9 @@ announce(const char *prefix, const struct block *b, const char *in, size_t n)
     outs(tmp.s);
   } else if (tool_arg(in, n, "question", &tmp))
     out(tmp.s, tmp.len > 100 ? 100 : tmp.len);
-  outs(")\n");
+  outs(")");
+  sgr(0);
+  outs("\n");
 }
 
 static const struct tool notools[] = { { 0, 0, 0, 0, 0, 0 } };
@@ -907,9 +1049,12 @@ check(const struct tool *t, const char *in, size_t n)
       !stralloc_cats(&b->text, "."))
     nomem();
 
+  sgr(DIM);
   outs("  (auto mode: checking with ");
   outs(checkmodel);
-  outs(")\n");
+  outs(")");
+  sgr(0);
+  outs("\n");
   flush();
   r = exchange(&cconv, checksys, notools, checkmodel, 4096, 0);
   if (!stralloc_copys(&cwhy, "")) nomem();
@@ -974,22 +1119,29 @@ approve(const struct tool *t, const char *in, size_t n)
     if (!stralloc_0(&rwhy)) nomem();
     if (r == PERM_UNSURE && mode == MODE_AUTO) {
       if (check(t, in, n)) {
+        sgr(DIM);
         outs("  (allowed by the auto-mode check: ");
         outs(cwhy.s);
-        outs(")\n");
+        outs(")");
+        sgr(0);
+        outs("\n");
         return 1;
       }
       if (intr) return 0;
+      sgr(YELLOW);
       outs("  (auto mode asks: ");
       outs(rwhy.s);
       outs("; the check said: ");
       outs(cwhy.s);
-      outs(")\n");
+      outs(")");
     } else {
+      sgr(YELLOW);
       outs("  (auto mode asks: ");
       outs(rwhy.s);
-      outs(")\n");
+      outs(")");
     }
+    sgr(0);
+    outs("\n");
   }
   if (!str_diff(t->name, "bash")) {
     if (tool_arg(in, n, "command", &tmp)) lines("  $ ", tmp.s, tmp.len, 20);
@@ -1016,10 +1168,12 @@ approve(const struct tool *t, const char *in, size_t n)
     if (tool_arg(in, n, "url", &tmp)) lines("  GET ", tmp.s, tmp.len, 1);
   }
   flush();
-  c = ui_ask("  Allow? [y]es, [n]o, [a]lways for this session: ");
+  c = ui_ask(color ? "  \033[1;33mAllow?\033[0m [y]es, [n]o, [a]lways for "
+      "this session: " : "  Allow? [y]es, [n]o, [a]lways for this session: ");
   last = '\n';
   if (!c) {
-    outs("  (declined: no terminal to ask on; see -P)\n");
+    styled(YELLOW, "  (declined: no terminal to ask on; see -P)");
+    outs("\n");
     return 0;
   }
   if (c == 'a') allowed[i] = 1;
@@ -1414,6 +1568,91 @@ showusage(void)
   outs("\n");
 }
 
+/* a number of tokens, short: 950, 12.4K, 1.2M */
+static void
+catk(stralloc *s, unsigned long u)
+{
+  const char *unit = u >= 1000000 ? "M" : u >= 1000 ? "K" : "";
+  unsigned long d = u >= 1000000 ? 1000000 : u >= 1000 ? 1000 : 1;
+
+  if (!stralloc_catulong(s, u / d)) nomem();
+  if (d > 1 && u / d < 100 && (!stralloc_append(s, '.') ||
+      !stralloc_catulong(s, u % d * 10 / d)))
+    nomem();
+  if (!stralloc_cats(s, unit)) nomem();
+}
+
+/* the line above the prompt: model, mode, context and tokens so far */
+static void
+statusline(void)
+{
+  static stralloc s;
+  unsigned long t = total.in + total.cread + total.cwrite + total.out;
+
+  if (!stralloc_copys(&s, " ") || !stralloc_cats(&s, model) ||
+      !stralloc_cats(&s, " \302\267 ") || !stralloc_cats(&s, modes[mode]))
+    nomem();
+  if (ctxwin) {
+    if (!stralloc_cats(&s, " \302\267 context ") ||
+        !stralloc_catulong(&s, estimate() * 100 / ctxwin) ||
+        !stralloc_cats(&s, "% of "))
+      nomem();
+    catk(&s, ctxwin);
+  }
+  if (t) {
+    if (!stralloc_cats(&s, " \302\267 ")) nomem();
+    catk(&s, t);
+    if (!stralloc_cats(&s, " tokens")) nomem();
+  }
+  if (!stralloc_0(&s)) nomem();
+  styled(DIM, s.s);
+  outs("\n");
+}
+
+/* the prompt; libedit is told about escapes by \1 around them */
+static const char *
+prompt(int more)
+{
+  static stralloc p;
+  const char *w = more ? "..." : mode == MODE_AUTO ? "auto" :
+      mode == MODE_RULES ? "rules" : mode == MODE_YES ? "yes" : "";
+
+  if (!stralloc_copys(&p, color ? "\001\033[1;36m\001" : "") ||
+      !stralloc_cats(&p, w) || !stralloc_cats(&p, more ? "" : ">") ||
+      !stralloc_cats(&p, color ? "\001\033[0m\001 " : " ") || !stralloc_0(&p))
+    nomem();
+  return p.s;
+}
+
+/*
+ * reads the next task into line; a line ending in \ goes on to the
+ * next.  returns as ui_readline does.
+ */
+static int
+readtask(stralloc *line)
+{
+  static stralloc more;
+  int r;
+
+  if (isatty(0)) {
+    nl();
+    statusline();
+    flush();
+  }
+  r = ui_readline(line, prompt(0));
+  while (r > 0 && line->len && line->s[line->len - 1] == '\\') {
+    line->s[line->len - 1] = '\n';
+    if (ui_readline(&more, prompt(1)) <= 0) break;
+    if (!stralloc_cat(line, &more)) nomem();
+  }
+  if (r > 0) {
+    if (!stralloc_0(line)) nomem();
+    --line->len;
+  }
+  last = '\n';
+  return r;
+}
+
 static void
 showmode(void)
 {
@@ -1433,6 +1672,9 @@ main(int argc, char **argv)
   int r;
 
   signal(SIGPIPE, SIG_IGN);
+  /* colour for a terminal, unless NO_COLOR (no-color.org) says not */
+  color = isatty(1) && !getenv("NO_COLOR") && env("TERM", 0) &&
+      str_diff(env("TERM", ""), "dumb");
   sa.sa_handler = onint;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;  /* no SA_RESTART: blocked calls must return EINTR */
@@ -1563,17 +1805,17 @@ main(int argc, char **argv)
   }
 
   if (isatty(0)) {
-    outs("kraft " KRAFT_VERSION ": ");
+    styled(BOLD, "kraft " KRAFT_VERSION);
+    sgr(DIM);
+    outs(": ");
     outs(model);
     outs(" at ");
     outs(base);
-    outs(", permission mode ");
-    outs(modes[mode]);
-    outs(". /help for help.\n");
+    outs(". /help for help; end a line with \\ to go on to the next.");
+    sgr(0);
+    outs("\n");
   }
-  while ((r = ui_readline(&line, mode == MODE_AUTO ? "auto> " :
-      mode == MODE_RULES ? "rules> " :
-      mode == MODE_YES ? "yes> " : "> "))) {
+  while ((r = readtask(&line))) {
     if (r < 0) {  /* ^C at the prompt: start a fresh line */
       intr = 0;
       outs("\n");

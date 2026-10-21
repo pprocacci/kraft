@@ -33,8 +33,19 @@ on the command line,
 carries it out and exits.
 Otherwise it prompts for tasks with
 .Sq >\ \&
-until end of input.
+until end of input, with line editing and history, and a line above
+the prompt showing the model, the permission mode, how full the
+context window is and the tokens used so far.
+A line ending in a backslash goes on to the next, for tasks of more
+than one line.
 When standard input is not a terminal, each line is a task.
+.Pp
+On a terminal, replies are shown with their Markdown rendered (bold,
+headings, code in colour), tool calls and their results are marked
+out, and a spinner shows while the model is thinking.
+Colour is left out when output is not a terminal, or when
+.Ev NO_COLOR
+is set.
 A word
 .Ar @path
 in a task attaches that file, if it is an image or (with the
@@ -313,6 +324,8 @@ It must be served by the same server, at the same URL.
 .It Ev KRAFT_URL
 Default for
 .Fl u .
+.It Ev NO_COLOR
+If set, no colour or other terminal attributes are used.
 .It Ev KRAFT_API_KEY
 The key to send.
 If unset,

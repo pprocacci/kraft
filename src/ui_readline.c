@@ -58,7 +58,8 @@ ui_readline(stralloc *line, const char *p)
       hist = history_init();
       history(hist, &ev, H_SETSIZE, 1000);
       el_set(el, EL_HIST, history, hist);
-      el_set(el, EL_PROMPT, getprompt);
+      /* the prompt may hold escapes between \1s, which take no room */
+      el_set(el, EL_PROMPT_ESC, getprompt, '\1');
       el_set(el, EL_EDITOR, "emacs");
       el_set(el, EL_SIGNAL, 1);
       el_source(el, 0);
