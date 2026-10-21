@@ -8,5 +8,7 @@ int json_str(stralloc *, const char *, size_t);
 size_t json_skip(const char *, size_t, size_t);
 int json_get(const char *, size_t, const char *, const char **, size_t *);
 int json_unstr(stralloc *, const char *, size_t);
+int json_is(const char *, size_t, const char *);
+int json_object(const char *, size_t);
 
 #endif

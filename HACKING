@@ -34,12 +34,42 @@ Layout
   t/          tests; run them with make test
   man/        manual pages
 
+How it fits together
+--------------------
+
+kraft.c runs the agent loop: the user's task goes into the
+conversation (conv_*), the backend renders the conversation into a
+request, the reply streams back over HTTP (http_*, tls_*) as
+server-sent events (sse_*), and the backend's event function builds
+the assistant message from them.  If that message calls tools, they
+run (tool_*) and their results go back as the next user message, and
+round it goes until the model stops calling tools.
+
+The conversation is append-only.  Anthropic thinking blocks are kept
+exactly as received and sent back unchanged, as the API requires.
+
 API backends
 ------------
 
-Each backend is a pair of functions, PREFIX_body (build a request)
-and PREFIX_delta (handle one stream event), listed in the apis[]
-table in kraft.c:
+Each backend is a pair of functions, PREFIX_render (conversation to
+request body) and PREFIX_event (one stream event into the assistant
+message), listed in the apis[] table in kraft.c:
 
   anth_*   Anthropic Messages API     POST /v1/messages
   oai_*    OpenAI Chat Completions    POST /v1/chat/completions
+
+Tools
+-----
+
+Each tool is one tool_* function taking its input as a JSON object,
+listed with its description and JSON Schema in tool_all.c.  Tools
+marked ask need the user's approval.  A tool returns 1 on success or
+0 on failure, with its output or the reason in out; either way the
+model sees it.
+
+TLS
+---
+
+tls_connect() forks a helper that owns the TLS session and relays
+plaintext over a socketpair, ucspi-tls style, so the HTTP code only
+ever sees a file descriptor.  It uses the OpenSSL in base.

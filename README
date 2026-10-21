@@ -1,7 +1,14 @@
 kraft - a coding agent, written in C, for FreeBSD first.
 
+You describe a task; the model reads and changes files and runs
+commands to do it, asking before anything that changes the system.
+It speaks the Anthropic Messages API and OpenAI-compatible Chat
+Completions APIs, so it works with Claude and with local servers
+such as LM Studio, llama.cpp and vLLM.
+
   make && make test
-  ./kraft -u http://host:1234 -m some-model 'Say hi'
-  ./kraft -a openai -u http://host:1234/v1 -m some-model 'Say hi'
+  ./kraft -u http://host:1234 -m some-model
+  ./kraft -u https://api.anthropic.com -m claude-opus-5 'fix the build'
+  ./kraft -a openai -u http://host:1234/v1 -m some-model
 
 See kraft(1) and HACKING.

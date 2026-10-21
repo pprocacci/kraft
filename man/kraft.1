@@ -6,18 +6,35 @@
 .Nd coding agent
 .Sh SYNOPSIS
 .Nm
-.Op Fl t
+.Op Fl ty
 .Op Fl a Ar api
 .Op Fl m Ar model
 .Op Fl n Ar max_tokens
 .Op Fl u Ar url
-.Op Ar prompt ...
+.Op Ar task ...
 .Sh DESCRIPTION
 .Nm
-sends
-.Ar prompt
-(or, if none is given, standard input) to a language model and
-streams the reply to standard output.
+is a coding agent.
+You describe a task; a language model works on it by asking
+.Nm
+to read and change files and run commands in the current directory,
+and
+.Nm
+carries those requests out, asking you before anything that changes
+the system.
+The model keeps going until the task is done, then waits for the next.
+.Pp
+With a
+.Ar task
+on the command line,
+.Nm
+carries it out and exits.
+Otherwise it prompts for tasks with
+.Sq >\ \&
+until end of input.
+When standard input is not a terminal, each line is a task.
+The conversation is kept between tasks, so later tasks can refer to
+earlier ones.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -33,16 +50,63 @@ the default) or
 .It Fl m Ar model
 The model to use.
 .It Fl n Ar max_tokens
-The most tokens the model may generate.
-The default is 8192.
+The most tokens the model may generate in one reply.
+The default is 16384.
 .It Fl t
 Copy the model's reasoning, when the server sends it, to standard
 error.
 .It Fl u Ar url
 The base URL of the server, with or without a trailing
 .Pa /v1 .
+Both http and https are supported.
 The default is
 .Pa http://127.0.0.1:1234 .
+.It Fl y
+Allow every tool call without asking.
+Use this only where the model can do no harm, such as a scratch jail.
+.El
+.Sh TOOLS
+The model may call these tools.
+Those marked with an asterisk need your approval: answer
+.Cm y
+to allow the call,
+.Cm n
+to refuse it, or
+.Cm a
+to allow that tool for the rest of the session.
+Without a terminal to ask on, such calls are refused unless
+.Fl y
+is given.
+.Bl -tag -width "write_file*"
+.It Cm read_file
+Read a file, with line numbers.
+.It Cm write_file Ns *
+Create or replace a file.
+.It Cm edit_file Ns *
+Replace text in a file.
+The text must match exactly and, unless all occurrences are to be
+replaced, occur exactly once.
+.It Cm bash Ns *
+Run a command with
+.Pa /bin/sh .
+.It Cm find_files
+Find files by name.
+.It Cm grep
+Search file contents with
+.Xr grep 1 .
+.It Cm list_dir
+List a directory.
+.El
+.Sh COMMANDS
+At the prompt:
+.Bl -tag -width "/clear"
+.It Cm /clear
+Forget the conversation.
+.It Cm /help
+List the commands.
+.It Cm /exit
+Quit.
+So does end of input (control-D).
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width ANTHROPIC_API_KEY
@@ -61,7 +125,19 @@ If unset,
 .Ev ANTHROPIC_API_KEY
 or
 .Ev OPENAI_API_KEY
-is used, depending on the API.
+is used, depending on the API, and failing that the key file.
+.El
+.Sh FILES
+.Bl -tag -width "~/.kraft/anthropic.key"
+.It Pa ~/.kraft/anthropic.key , ~/.kraft/openai.key
+The API key, used when none is set in the environment.
+The file may hold the bare key or a line such as
+.Ql export ANTHROPIC_API_KEY=... ;
+it is read, never run.
+It should be readable only by you.
+.It Pa KRAFT.md
+Project instructions, read from the current directory and given to
+the model.
 .El
 .Sh EXIT STATUS
 .Nm
@@ -69,9 +145,18 @@ exits 0 on success, 100 on a permanent failure such as bad usage or
 a rejected request, and 111 on a temporary failure such as a
 network error.
 .Sh EXAMPLES
-Ask an LM Studio server on another machine:
+Work with a model served by LM Studio on another machine:
 .Bd -literal -offset indent
-kraft -u http://192.168.10.234:1234 -m qwen/qwen3.8-27b 'Say hi'
+kraft -u http://192.168.10.234:1234 -m qwen/qwen3.8-27b
+.Ed
+.Pp
+Have Claude fix a failing build, then exit:
+.Bd -literal -offset indent
+kraft -u https://api.anthropic.com -m claude-opus-5 \e
+    'make fails; find out why and fix it'
 .Ed
 .Sh BUGS
-Only one prompt is handled per run; there is no conversation yet.
+Interrupting a reply with control-C ends
+.Nm
+rather than just the reply.
+The conversation is not saved between runs.
