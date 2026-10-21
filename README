@@ -74,6 +74,15 @@ At an approval prompt: y yes, n no, a always this session, p always
 here (saved as a rule in .kraft/config).  ^C stops the reply or
 command in progress.
 
+MCP servers, one per line in the config, add their tools; every call
+is asked about unless a rule allows it:
+
+  mcp fs npx -y @modelcontextprotocol/server-filesystem /home/me/notes
+  allow mcp__fs__* *
+
+With devel/universal-ctags installed the model also gets a symbols
+tool, to find definitions without reading whole files.
+
 At the prompt
 -------------
 
@@ -84,6 +93,7 @@ At the prompt
   /compact        summarize the conversation to save context
   /usage          tokens, cache hits, context use
   /rules /mode    the permission rules, and the mode
+  /mcp            the MCP servers and their tools
   /help           all of them
 
 kraft -r resumes the last session in the current directory.

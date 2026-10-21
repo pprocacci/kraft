@@ -16,5 +16,5 @@ const struct tool tool_symbol = {
   "\"path\":{\"type\":\"string\","
   "\"description\":\"File or directory; default .\"}},"
   "\"required\":[]}",
-  0, tool_symbols, 0
+  0, tool_symbols, 0, 0, 0
 };

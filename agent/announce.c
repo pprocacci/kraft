@@ -37,6 +37,12 @@ announce(const char *prefix, const struct block *b, const char *in, size_t n)
     outs(tmp.s);
   } else if (tool_arg(in, n, "question", &tmp))
     out(tmp.s, tmp.len > 100 ? 100 : tmp.len);
+  else if (b->name.len > 5 && !byte_diff(b->name.s, 5, "mcp__") && n > 2) {
+    /* someone else's tool: its arguments as they are */
+    for (k = 1; k < n - 1 && k < 101; ++k)
+      out(in[k] == '\n' ? " " : in + k, 1);
+    if (n > 102) outs("...");
+  }
   outs(")");
   sgr(0);
   outs("\n");

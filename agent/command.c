@@ -22,6 +22,7 @@ help(void)
       "  /model    show or change the model\n"
       "  /usage    show tokens used, cache hits, context size, and cost\n"
       "  /rules    list the allow and deny rules from the config files\n"
+      "  /mcp      list the MCP servers and their tools\n"
       "  /diff     show the uncommitted changes (in a git repository)\n"
       "  /commit   have the model commit them, with a fitting message\n"
       "  /help     show this\n"
@@ -256,6 +257,7 @@ command(const char *line)
     return 1;
   }
   if (!str_diff(line, "/rules")) { showrules(); return 1; }
+  if (!str_diff(line, "/mcp")) { mcplist(); return 1; }
   if (!str_diff(line, "/diff")) { showdiff(); return 1; }
   if (!str_diff(line, "/commit")) {
     if (!ingit) { outs("(not in a git repository)\n"); return 1; }

@@ -34,10 +34,10 @@ volatile sig_atomic_t intr;
 volatile sig_atomic_t curfd = -1;
 
   /* the connection being read */
-struct tool tools[40];
+struct tool tools[256];
 
   /* this session's: tool_all, and server tools */
-int allowed[40];
+int allowed[256];
 
   /* by tool index: approved for the session */
 int websearch;
@@ -49,7 +49,7 @@ stralloc ruledeny;
 /* Anthropic's web search; it runs on their servers, so it cannot be asked about */
 const struct tool searchtool = {
   "web_search", 0, 0, 0, 0,
-  "{\"type\":\"web_search_20260209\",\"name\":\"web_search\",\"max_uses\":5}"
+  "{\"type\":\"web_search_20260209\",\"name\":\"web_search\",\"max_uses\":5}", 0, 0
 };
 
 char last = '\n';
@@ -153,7 +153,7 @@ unsigned long undoseq;
   /* the last entry */
 unsigned long taskno;
 
-const struct tool notools[] = { { 0, 0, 0, 0, 0, 0 } };
+const struct tool notools[] = { { 0, 0, 0, 0, 0, 0, 0, 0 } };
 
 const char checksys[] =
     "You review actions that a coding agent wants to take on the user's "
@@ -172,7 +172,7 @@ const char checksys[] =
 
 int pdfok;
 
-struct tool subtools[40];
+struct tool subtools[256];
 
   /* tools, less task, ask_user and todo */
 stralloc subsys;
@@ -192,7 +192,7 @@ const struct tool tasktool = {
   "\"description\":\"A few words saying what it is for\"},"
   "\"prompt\":{\"type\":\"string\",\"description\":\"The full brief\"}},"
   "\"required\":[\"description\",\"prompt\"]}",
-  0, subagent, 0
+  0, subagent, 0, 0, 0
 };
 
 /*
@@ -223,3 +223,9 @@ stralloc projcfg;
 
         /* the project's .kraft/config */
 stralloc word;
+
+/* MCP servers, and the tools they offer */
+struct mcp mcps[MAXMCP];
+unsigned long nmcps;
+struct tool mcptools[MAXMCPTOOLS];
+unsigned long nmcptools;

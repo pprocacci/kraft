@@ -320,7 +320,7 @@ and
 .Cm deny Ar tool pattern
 are permission rules.
 .Ar tool
-is a tool's name,
+is a tool's name (or a glob matching names),
 .Cm edit
 for
 .Cm write_file ,
@@ -366,6 +366,27 @@ elsewhere could otherwise give itself any permission.
 Rules that kraft adds itself, with the
 .Cm p
 answer, keep it trusted.
+.Pp
+.Cm mcp Ar name command
+adds a Model Context Protocol server: a command, run with
+.Pa /bin/sh ,
+that speaks MCP on its standard input and output.
+It is started with
+.Nm ,
+and its tools are offered to the model as
+.Cm mcp__ Ns Ar name Ns Cm __ Ns Ar tool .
+A project's config may name a server of the same name as yours, and
+replaces it.
+For example:
+.Bd -literal -offset indent
+mcp fs npx -y @modelcontextprotocol/server-filesystem /home/me/notes
+mcp gh env GITHUB_TOKEN=... github-mcp-server stdio
+.Ed
+.Pp
+As there is no knowing what another program's tools do, every call
+is subject to the permission mode; a rule such as
+.Ql allow mcp__fs__* *
+allows a server's tools without asking.
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.
@@ -485,6 +506,8 @@ and
 can be undone, not what commands did.
 .It Cm /rules
 List the permission rules in force, and where each came from.
+.It Cm /mcp
+List the MCP servers, whether each is running, and their tools.
 .It Cm /diff
 Show the uncommitted changes, in a git repository.
 .It Cm /commit
@@ -591,6 +614,10 @@ Settings and permission rules; see
 .Sx CONFIGURATION .
 .It Pa ~/.kraft/trusted
 The project config files you have trusted, with a hash of each.
+.It Pa ~/.kraft/mcp- Ns Ar name Ns Pa .log
+The standard error of MCP server
+.Ar name ,
+from its last start.
 .It Pa ~/.kraft/KRAFT.md
 Instructions for every project, given to the model first.
 .It Pa KRAFT.md

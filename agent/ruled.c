@@ -3,7 +3,7 @@
 static int
 forme(const struct rule *r, const char *name)
 {
-  return !str_diff(r->tool, "*") || !str_diff(r->tool, name) ||
+  return !fnmatch(r->tool, name, 0) ||
       (!str_diff(r->tool, "edit") && isedit(name));
 }
 

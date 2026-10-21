@@ -50,6 +50,7 @@ main(int argc, char **argv)
   sa.sa_flags = 0;  /* no SA_RESTART: blocked calls must return EINTR */
   sigaction(SIGINT, &sa, 0);
   atexit(job_killall);  /* background commands do not outlive kraft */
+  atexit(mcpstop);
 
   argv = options(argc, argv, &resumeit);
   if (script) {
@@ -60,6 +61,7 @@ main(int argc, char **argv)
   }
   setconnection();
   mksystem();
+  mcpstart();
   settools();
   if (!ctxwin) findwindow();
   if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||

@@ -67,7 +67,8 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
           tool_arg(in, n, "path", &tmp) &&
           undo_save(undodir.s, undoseq + 1, taskno, tmp.s);
       if (snap) ++undoseq;
-      res->iserr = !t->run(in, n, &res->text);
+      res->iserr = !(t->mcp ? mcpcall(t, in, n, &res->text) :
+          t->run(in, n, &res->text));
       if (snap && res->iserr) {
         /* nothing changed after all */
         if (!stralloc_copy(&tmp, &undodir) || !stralloc_cats(&tmp, "/") ||

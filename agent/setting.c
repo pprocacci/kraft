@@ -40,6 +40,24 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
     ++nrules;
     return 1;
   }
+  if (!str_diff(k, "mcp")) {
+    /* mcp NAME COMMAND ... */
+    i = byte_chr(v, str_len(v), ' ');
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    if (!*word.s || !v[i]) {
+      kwarn(tmp.s, "mcp needs a name and a command", 0);
+      return 1;
+    }
+    for (u = 0; u < nmcps && str_diff(mcps[u].name, word.s); ++u) ;
+    if (u == MAXMCP) {
+      kwarn(tmp.s, "too many MCP servers", 0);
+      return 1;
+    }
+    if (u == nmcps) mcps[nmcps++].name = sdup(word.s);
+    mcps[u].cmd = sdup(v + i);  /* the project's may replace the user's */
+    return 1;
+  }
   if (!str_diff(k, "api")) cfgapi = sdup(v);
   else if (!str_diff(k, "url")) base = sdup(v);
   else if (!str_diff(k, "model")) model = sdup(v);

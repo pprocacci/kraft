@@ -16,6 +16,8 @@ struct tool {
   int ask;             /* needs the user's approval */
   int (*run)(const char *, size_t, stralloc *);
   const char *raw;     /* a server tool's whole definition, or 0 */
+  int mcp;             /* an MCP server's tool: the server, from 1 */
+  const char *mname;   /* and its name there */
 };
 
 extern const struct tool tool_all[];  /* ends with a null name */

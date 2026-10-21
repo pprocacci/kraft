@@ -15,6 +15,8 @@ settools(void)
     tools[i] = tool_all[i];
   tools[i++] = tasktool;
   if (access(UCTAGS, X_OK) == 0) tools[i++] = tool_symbol;
+  for (r = 0; r < nmcptools && i < sizeof tools / sizeof tools[0] - 2; ++r)
+    tools[i++] = mcptools[r];
   if (websearch) {
     if (pdfok)
       tools[i++] = searchtool;

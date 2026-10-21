@@ -75,7 +75,8 @@ approve(const struct tool *t, const char *in, size_t n)
     if (tool_arg(in, n, "command", &tmp)) lines("  $ ", tmp.s, tmp.len, 20);
   } else if (!str_diff(t->name, "web_fetch")) {
     if (tool_arg(in, n, "url", &tmp)) lines("  GET ", tmp.s, tmp.len, 1);
-  }
+  } else if (t->mcp && n > 102)
+    lines("  | ", in, n, 20);  /* more than the call's line showed */
   flush();
   c = ui_ask(color ? "  \033[1;33mAllow?\033[0m [y]es, [n]o, [a]lways this "
       "session, [p]ermanently here: " : "  Allow? [y]es, [n]o, [a]lways this "

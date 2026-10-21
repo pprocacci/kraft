@@ -30,6 +30,7 @@
 #include "http.h"
 #include "job.h"
 #include "json.h"
+#include "mcp.h"
 #include "md.h"
 #include "media.h"
 #include "oai.h"
@@ -107,8 +108,8 @@ extern unsigned long max;
 extern int showthink, mode, status;
 extern volatile sig_atomic_t intr;
 extern volatile sig_atomic_t curfd;
-extern struct tool tools[40];
-extern int allowed[40];
+extern struct tool tools[256];
+extern int allowed[256];
 extern int websearch;
 extern stralloc ruledeny;
 extern const struct tool searchtool;
@@ -147,7 +148,7 @@ extern unsigned long taskno;
 extern const struct tool notools[];
 extern const char checksys[];
 extern int pdfok;
-extern struct tool subtools[40];
+extern struct tool subtools[256];
 extern stralloc subsys;
 extern const struct tool tasktool;
 extern struct rule rules[256];
@@ -219,5 +220,17 @@ void customs(void);
 int price(const char *m, const struct usage *u, unsigned long long *cost);
 void catcost(stralloc *s);
 void scriptout(int json);
+
+/* MCP servers, from the config, and their tools */
+#define MAXMCP 16
+#define MAXMCPTOOLS 200
+extern struct mcp mcps[MAXMCP];
+extern unsigned long nmcps;
+extern struct tool mcptools[MAXMCPTOOLS];
+extern unsigned long nmcptools;
+void mcpstart(void);
+void mcpstop(void);
+int mcpcall(const struct tool *t, const char *in, size_t n, stralloc *out);
+void mcplist(void);
 
 #endif
