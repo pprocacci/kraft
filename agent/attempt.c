@@ -1,6 +1,6 @@
 #include "agent.h"
 
-static void tally(int ismain);
+static void tally(int ismain, const char *mdl);
 static void slurp(void);
 static int toolong(const char *s);
 static void keeptext(struct conv *c);
@@ -10,13 +10,14 @@ static void mdreset(void);
 
 /* adds the last request's usage to the session's */
 static void
-tally(int ismain)
+tally(int ismain, const char *mdl)
 {
   total.in += reply.u.in;
   total.cread += reply.u.cread;
   total.cwrite += reply.u.cwrite;
   total.out += reply.u.out;
   ++requests;
+  if (!price(mdl, &reply.u, &cost)) costgap = 1;
   if (ismain) {
     lastmain = reply.u;
     pending = 0;
@@ -235,7 +236,7 @@ attempt(struct conv *c, const char *sysp, const struct tool *tools,
   }
   curfd = -1;
   close(fd);
-  tally(c == &conv);
+  tally(c == &conv, mdl);
   if (show) {
     mdreset();
     nl();
@@ -244,7 +245,7 @@ attempt(struct conv *c, const char *sysp, const struct tool *tools,
   return 1;
 
 cut:
-  tally(c == &conv);
+  tally(c == &conv, mdl);
   keeptext(c);
   if (show) mdreset();
 stopped:

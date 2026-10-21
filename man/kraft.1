@@ -466,7 +466,17 @@ mode.
 .It Cm /usage
 Show the tokens used this session: input, how much of it was read
 from or written to the prompt cache, output, and roughly how full
-the context window is.
+the context window is; and, with the Anthropic API, what the session
+has cost at Anthropic's list prices (which kraft knows only for the
+models current when it was released, and which may since have
+changed).
+The status line shows the cost too.
+.It Cm /model Op Ar model
+Show or change the model.
+Unless the context window was given, it is looked up afresh, and the
+auto-mode check follows the change unless it has a model of its own.
+With the Anthropic API a change makes the next request rebuild the
+prompt cache.
 .It Cm /effort Op Ar effort
 Show or change the effort, as for
 .Fl e ,

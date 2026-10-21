@@ -19,7 +19,8 @@ help(void)
       "              /mode yes    never ask\n"
       "  /undo     put back the files the last task changed (again to go\n"
       "            further back); changes made by commands are not undone\n"
-      "  /usage    show tokens used, cache hits, and context size\n"
+      "  /model    show or change the model\n"
+      "  /usage    show tokens used, cache hits, context size, and cost\n"
       "  /rules    list the allow and deny rules from the config files\n"
       "  /diff     show the uncommitted changes (in a git repository)\n"
       "  /commit   have the model commit them, with a fitting message\n"
@@ -58,6 +59,35 @@ showusage(void)
     num(" (", estimate() * 100 / ctxwin, "%)");
   }
   outs("\n");
+  if (!stralloc_copys(&tmp, "")) nomem();
+  catcost(&tmp);
+  if (!stralloc_0(&tmp)) nomem();
+  outs("cost:          ");
+  if (!*tmp.s) outs("unknown (not a model on the Anthropic API)\n");
+  else {
+    outs(tmp.s);
+    outs(costgap ? " at list prices; some requests could not be priced\n" :
+        " at Anthropic's list prices\n");
+  }
+}
+
+/* /model [name]: show, or change, the model */
+static void
+setmodel(const char *m)
+{
+  while (*m == ' ') ++m;
+  if (*m) {
+    if (!str_diff(checkmodel, model)) checkmodel = sdup(m);  /* it follows */
+    model = sdup(m);
+    if (!ctxset) {
+      /* a new model, a new window */
+      ctxwin = 0;
+      findwindow();
+    }
+  }
+  outs("(model: ");
+  outs(model);
+  outs(")\n");
 }
 
 static void
@@ -221,6 +251,10 @@ command(const char *line)
     return 1;
   }
   if (!str_diff(line, "/usage")) { showusage(); return 1; }
+  if (!str_diff(line, "/model") || str_start(line, "/model ")) {
+    setmodel(line + 6);
+    return 1;
+  }
   if (!str_diff(line, "/rules")) { showrules(); return 1; }
   if (!str_diff(line, "/diff")) { showdiff(); return 1; }
   if (!str_diff(line, "/commit")) {

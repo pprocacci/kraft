@@ -38,6 +38,8 @@ statusline(void)
     if (!stralloc_cats(&s, " \302\267 ")) nomem();
     catk(&s, t);
     if (!stralloc_cats(&s, " tokens")) nomem();
+    if (cost && !stralloc_cats(&s, " \302\267 ")) nomem();
+    if (cost) catcost(&s);
   }
   if (!stralloc_0(&s)) nomem();
   styled(DIM, s.s);

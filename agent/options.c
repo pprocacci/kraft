@@ -54,5 +54,6 @@ options(int argc, char **argv, int *resumeit)
   if (!api) strerr_die(100, FATAL, "unknown API: ", aname);
   if (!model) strerr_die(100, FATAL, "no model: use -m or set KRAFT_MODEL", 0);
   if (!checkmodel) checkmodel = model;
+  ctxset = ctxwin != 0;  /* given in a config, the environment or -c */
   return argv + optind;
 }

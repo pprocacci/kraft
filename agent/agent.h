@@ -101,7 +101,8 @@ extern const struct api *api;
 extern const char *model, *base;
 extern const char *checkmodel;
 extern const char *effort, *effortnow;
-extern const char *effort, *effortnow;
+extern unsigned long long cost;
+extern int costgap, ctxset;
 extern unsigned long max;
 extern int showthink, mode, status;
 extern volatile sig_atomic_t intr;
@@ -215,5 +216,7 @@ void newsession(void);
 void memory(stralloc *s);
 int custom(const char *line);
 void customs(void);
+int price(const char *m, const struct usage *u, unsigned long long *cost);
+void catcost(stralloc *s);
 
 #endif
