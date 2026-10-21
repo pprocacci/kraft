@@ -13,6 +13,7 @@ mcpread(const char *server, size_t n, const char *uri, stralloc *out)
   const char *v;
   size_t vn;
   unsigned long k, i;
+  int r;
 
   for (k = 0; k < nmcps; ++k)
     if (str_len(mcps[k].name) == n && !byte_diff(mcps[k].name, n, server))
@@ -27,7 +28,10 @@ mcpread(const char *server, size_t n, const char *uri, stralloc *out)
       !json_str(&params, uri, str_len(uri)) || !stralloc_cats(&params, "}") ||
       !stralloc_0(&params))
     nomem();
-  if (!mcp_rpc(&mcps[k], "resources/read", params.s, &res, 120, &intr)) {
+  plock(1);
+  r = mcp_rpc(&mcps[k], "resources/read", params.s, &res, 120, &intr);
+  plock(0);
+  if (!r) {
     if (!stralloc_copys(out, "MCP server ") ||
         !stralloc_cats(out, mcps[k].name) || !stralloc_cats(out, ": ") ||
         !stralloc_cat(out, &res))

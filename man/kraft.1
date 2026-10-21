@@ -463,6 +463,21 @@ and read by the model with
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.
+Calls in one reply are made in order, except that a run of calls
+that change nothing
+.Pf ( Cm read_file ,
+.Cm grep ,
+.Cm find_files ,
+.Cm list_dir
+and
+.Cm symbols )
+or start sub-agents
+.Pf ( Cm task )
+is made all at once, each in a process of its own.
+Sub-agents working at the same time take turns to ask you anything,
+and cannot start background commands; an
+.Cm a
+answer given to one lasts only as long as it does.
 .Bl -tag -width "bash_output"
 .It Cm read_file
 Read a file, with line numbers.
@@ -524,6 +539,7 @@ whose calls are shown indented and are subject to the permission
 mode.
 Only its final report comes back, so what it read does not fill the
 conversation.
+Several started in one reply work at the same time.
 .It Cm todo
 Keep a checklist for a task of several steps, shown as it changes.
 .It Cm ask_user

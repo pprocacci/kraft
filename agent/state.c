@@ -247,3 +247,7 @@ struct tool restool = {
 /* hooks, from the config */
 struct hook hooks[MAXHOOKS];
 unsigned long nhooks;
+
+/* calls run side by side */
+int inchild;
+int lockfd = -1;

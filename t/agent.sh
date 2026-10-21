@@ -188,6 +188,66 @@ err "not run: the reply was cut off"
 err "raise it with -n"
 reqs 1
 
+setup "parallel: reads all at once, then the rest in order" <<EOF
+reply
+tool read_file {"path":"r1.txt"}
+tool list_dir {"path":"."}
+tool grep {"pattern":"needle"}
+tool write_file {"path":"r1.txt","content":"changed"}
+tool read_file {"path":"r1.txt"}
+reply
+text OK.
+EOF
+echo "first needle" > "$P/r1.txt"
+run -P yes -p "go"
+status 0
+req 2 "first needle"
+req 2 "r1.txt:1"
+req 2 "changed"
+# the three reads are announced before any of their results
+awk '/^\* /{c++} /^  [|!] /{if (c < 3) bad=1; exit} END{exit bad}' "$T/err" ||
+    fail "the reads did not start together"
+
+setup "parallel: sub-agents at once, their costs counted" <<EOF
+reply
+tool task {"description":"one","prompt":"write x.txt"}
+tool task {"description":"two","prompt":"write y.txt"}
+reply
+tool write_file {"path":"x.txt","content":"x"}
+reply
+tool write_file {"path":"y.txt","content":"y"}
+reply
+text Report from a sub-agent.
+reply
+text Report from a sub-agent.
+reply
+text Both done.
+EOF
+printf 'go\n/undo\n' | run -P yes
+status 0
+reqs 6
+req 6 "Report from a sub-agent.*Report from a sub-agent"
+nofile x.txt
+nofile y.txt
+out "removed .*x.txt"
+out "removed .*y.txt"
+
+setup "parallel: -j counts the sub-agents' requests" <<EOF
+reply
+tool task {"description":"one","prompt":"look"}
+tool task {"description":"two","prompt":"look"}
+reply
+text Seen.
+reply
+text Seen.
+reply
+text Done.
+EOF
+run -P yes -j "go"
+status 0
+out '"requests":4'
+out '"output_tokens":80'
+
 setup "hooks: before blocks, after reports, done runs" <<EOF
 reply
 tool bash {"command":"rm -f keep"}

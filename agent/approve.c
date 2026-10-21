@@ -1,8 +1,24 @@
 #include "agent.h"
 
-/* asks whether tool t may run with input in; 1 if allowed */
+static int ask(const struct tool *t, const char *in, size_t n);
+
+/*
+ * asks whether tool t may run with input in; 1 if allowed.  a call
+ * running alongside others waits its turn for the terminal.
+ */
 int
 approve(const struct tool *t, const char *in, size_t n)
+{
+  int r;
+
+  plock(1);
+  r = ask(t, in, n);
+  plock(0);
+  return r;
+}
+
+static int
+ask(const struct tool *t, const char *in, size_t n)
 {
   const struct rule *ru;
   size_t i;

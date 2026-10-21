@@ -40,6 +40,7 @@ mcpcall(const struct tool *t, const char *in, size_t n, stralloc *out)
   const char *v;
   size_t vn;
   unsigned long i;
+  int r;
 
   if (!stralloc_copys(&params, "{\"name\":") ||
       !json_str(&params, t->mname, str_len(t->mname)) ||
@@ -47,7 +48,10 @@ mcpcall(const struct tool *t, const char *in, size_t n, stralloc *out)
       !stralloc_catb(&params, in, n) || !stralloc_cats(&params, "}") ||
       !stralloc_0(&params))
     nomem();
-  if (!mcp_rpc(m, "tools/call", params.s, &res, CALLSECS, &intr)) {
+  plock(1);  /* one at a time on its pipes */
+  r = mcp_rpc(m, "tools/call", params.s, &res, CALLSECS, &intr);
+  plock(0);
+  if (!r) {
     if (!stralloc_copys(out, "MCP server ") || !stralloc_cats(out, m->name) ||
         !stralloc_cats(out, ": ") || !stralloc_cat(out, &res))
       nomem();

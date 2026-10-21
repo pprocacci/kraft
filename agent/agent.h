@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -271,5 +272,12 @@ struct hook {
 extern struct hook hooks[MAXHOOKS];
 extern unsigned long nhooks;
 int hook(int when, const struct tool *t, const char *in, size_t n, const stralloc *result, int failed, stralloc *out);
+
+/* calls run side by side */
+extern int inchild;  /* this is a process running one of them */
+extern int lockfd;   /* the lock they share, or -1 */
+int canpar(const struct tool *t, const char *in, size_t n);
+void parallel(const struct tool **t, const char **in, const size_t *n, size_t k, stralloc *out, int *ok);
+void plock(int on);
 
 #endif
