@@ -1,0 +1,4 @@
+{"kraft":1,"cwd":"/x"}
+{"r":0,"b":[{"t":0,"text":"hi"},{"t":6,"id":"i","aux":"image/png","text":"AAAA"}]}
+{"r":1,"b":[{"t":1,"text":"","aux":"sig"},{"t":2,"id":"t","name":"bash","text":"{\"c\":1}"},{"t":4,"text":"{}"}]}
+{"r":0,"b":[{"t":3,"e":1,"id":"t","text":"out \u00e9"}]}

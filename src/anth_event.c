@@ -24,6 +24,7 @@ str2(const char *d, size_t n, const char *path, stralloc *a, stralloc *b)
   int r;
 
   if ((r = str(d, n, path, a)) <= 0) return r;
+  if (a->len == k) return 1;  /* an empty string: nothing to copy */
   return stralloc_catb(b, a->s + k, a->len - k) ? 1 : -1;
 }
 
@@ -33,7 +34,7 @@ num(const char *d, size_t n, const char *path, unsigned long *u)
   const char *v;
   size_t vn;
 
-  return json_get(d, n, path, &v, &vn) && scan_ulong(v, u) == vn;
+  return json_get(d, n, path, &v, &vn) && scan_ulongb(v, vn, u) == vn;
 }
 
 /* takes whichever usage counts the object at path has */

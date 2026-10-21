@@ -23,7 +23,7 @@ num(const char *d, size_t n, const char *path, unsigned long *u)
   const char *v;
   size_t vn;
 
-  return json_get(d, n, path, &v, &vn) && scan_ulong(v, u) == vn;
+  return json_get(d, n, path, &v, &vn) && scan_ulongb(v, vn, u) == vn;
 }
 
 static struct block *
@@ -49,7 +49,7 @@ call(struct msg *m, const char *d, size_t n, long k, stralloc *tmp)
   unsigned long u;
   long idx = k;
 
-  if (json_get(d, n, "index", &v, &vn) && scan_ulong(v, &u) == vn)
+  if (json_get(d, n, "index", &v, &vn) && scan_ulongb(v, vn, &u) == vn)
     idx = (long)u;
   if (!(b = tool(m, idx))) return -1;
   if (!stralloc_copys(tmp, "")) return -1;

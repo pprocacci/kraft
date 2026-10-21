@@ -150,7 +150,7 @@ findwindow(void)
       nomem();
     if (!getjson(p.s, &j)) continue;
     if (json_get(j.s, j.len, where[i][1], &v, &vn) &&
-        scan_ulong(v, &u) == vn && u)
+        scan_ulongb(v, vn, &u) == vn && u)
       ctxwin = u;
   }
   stralloc_free(&p);

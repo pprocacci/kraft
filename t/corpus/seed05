@@ -1,0 +1,5 @@
+{"choices":[{"delta":{"content":"a","reasoning_content":"r"}}]}
+{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"n","arguments":"{"}}]}}]}
+{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":1}}}
+[DONE]
+{"error":{"message":"m","type":"server_error"}}

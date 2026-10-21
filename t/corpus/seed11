@@ -1,0 +1,1 @@
+cc -o ../x a.c && ./sum `id` $X; find . -exec rm {} \; ; git -C /etc push; echo 'unterminated

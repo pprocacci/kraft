@@ -10,7 +10,7 @@ num(const char *d, size_t n, const char *path, unsigned long *u)
   const char *v;
   size_t vn;
 
-  return json_get(d, n, path, &v, &vn) && scan_ulong(v, u) == vn;
+  return json_get(d, n, path, &v, &vn) && scan_ulongb(v, vn, u) == vn;
 }
 
 static int

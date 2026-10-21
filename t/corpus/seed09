@@ -1,0 +1,8 @@
+# settings
+url http://h:1/v1
+model m
+mode auto
+allow bash make test*
+deny bash git push*
+  
+	key

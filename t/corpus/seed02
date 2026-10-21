@@ -1,0 +1,24 @@
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Retry-After: 3
+Location: /x
+
+1e
+event: ping
+data: {"a":1}
+
+
+f
+: comment
+data:
+f
+ x
+data: y
+
+dat
+b
+a: [DONE]
+
+
+0
+

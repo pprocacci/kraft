@@ -58,6 +58,14 @@ test: ${TESTS}
 	./t/conv
 	./t/perm
 
+# the fuzz harness: libFuzzer, with the address and undefined
+# behaviour sanitizers, built from the library's sources
+FUZZFLAGS?=	-g -O1 -fsanitize=fuzzer,address,undefined \
+		-fno-sanitize-recover=undefined
+fuzz: t/fuzz
+t/fuzz: t/fuzz.c ${LIBSRCS} ${HDRS}
+	${CC} ${FUZZFLAGS} -Iinclude -o t/fuzz t/fuzz.c ${LIBSRCS} ${LDLIBS}
+
 install: kraft
 	mkdir -p ${DESTDIR}${BINDIR} ${DESTDIR}${MANDIR}/man1
 	${INSTALL_PROGRAM} kraft ${DESTDIR}${BINDIR}/kraft
@@ -70,4 +78,4 @@ clean:
 	rm -f kraft kraft.o libkraft.a ${LIBOBJS} ${AGENTOBJS} ${TESTS} \
 	    kraft-*.tar.gz
 
-.PHONY: all test install dist clean
+.PHONY: all test fuzz install dist clean
