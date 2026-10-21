@@ -2,9 +2,10 @@
  * A libFuzzer harness for the code that reads untrusted input: what
  * comes from the network (HTTP, SSE, JSON, the two stream formats),
  * from disk (saved sessions, config files) and from the model (the
- * commands that auto mode judges, edits).  The first byte picks the
- * target.  Some targets also check properties, and abort if one
- * fails, so they find wrong answers as well as crashes.
+ * commands that auto mode judges, edits) and from MCP servers.  The
+ * first byte picks the target.  Some targets also check properties,
+ * and abort if one fails, so they find wrong answers as well as
+ * crashes.
  *
  *   make fuzz && ./t/fuzz -max_total_time=600 t/corpus
  */
@@ -23,6 +24,7 @@
 #include "html.h"
 #include "http.h"
 #include "json.h"
+#include "mcp.h"
 #include "md.h"
 #include "media.h"
 #include "oai.h"
@@ -197,6 +199,15 @@ command(const char *s, size_t n)
   perm_auto("edit_file", b.s, b.len, &c);
 }
 
+/* a message from an MCP server, perhaps a remote one */
+static void
+mcpmsg(const char *s, size_t n)
+{
+  static struct mcp m;  /* not up: an answer to the server goes nowhere */
+
+  mcp_take(&m, s, n, "7", 1, &a);
+}
+
 int
 LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 {
@@ -205,7 +216,7 @@ LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 
   if (!n || n > MAXIN) return 0;
   --n;
-  switch (d[0] % 12) {
+  switch (d[0] % 13) {
   case 0: json(s, n); break;
   case 1: http(s, n); break;
   case 2: events(anth_event, s, n); break;
@@ -227,6 +238,7 @@ LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
     stralloc_copys(&a, "");
     base64_enc(&a, s, n);
     break;
+  case 12: mcpmsg(s, n); break;
   }
   return 0;
 }
