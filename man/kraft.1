@@ -10,6 +10,7 @@
 .Op Fl a Ar api
 .Op Fl m Ar model
 .Op Fl n Ar max_tokens
+.Op Fl P Ar mode
 .Op Fl u Ar url
 .Op Ar task ...
 .Sh DESCRIPTION
@@ -61,22 +62,65 @@ The base URL of the server, with or without a trailing
 Both http and https are supported.
 The default is
 .Pa http://127.0.0.1:1234 .
+.It Fl P Ar mode
+When tool calls that change things need your approval; see
+.Sx PERMISSIONS .
+The default is
+.Cm ask .
 .It Fl y
-Allow every tool call without asking.
-Use this only where the model can do no harm, such as a scratch jail.
+The same as
+.Fl P Cm yes .
 .El
-.Sh TOOLS
-The model may call these tools.
-Those marked with an asterisk need your approval: answer
+.Sh PERMISSIONS
+Reading and searching never need approval.
+Writing and editing files and running commands do, depending on the
+permission mode:
+.Bl -tag -width Ds
+.It Cm ask
+Every such call is shown and you are asked: answer
 .Cm y
 to allow the call,
 .Cm n
 to refuse it, or
 .Cm a
 to allow that tool for the rest of the session.
-Without a terminal to ask on, such calls are refused unless
-.Fl y
-is given.
+.It Cm auto
+Calls that a fixed, conservative set of rules finds safe are allowed
+without asking; you are asked about the rest, with the reason.
+A file may be written or edited if it is inside the current
+directory, after resolving symbolic links and
+.Pa .. ,
+and not inside
+.Pa .git .
+A command may run if every command in it is a common read-only or
+build tool (such as
+.Cm ls ,
+.Cm grep ,
+.Cm git status ,
+.Cm make
+and
+.Cm cc )
+or a program in the current directory, and it uses no command or
+process substitution, here-document, or redirection other than to
+.Pa /dev/null .
+Commands such as
+.Cm rm ,
+.Cm git push ,
+.Cm make install ,
+.Cm sed -i
+and
+.Cm find -delete
+are always asked about.
+.It Cm yes
+Every call is allowed without asking.
+Use this only where the model can do no harm, such as a scratch jail.
+.El
+.Pp
+Without a terminal to ask on, calls that would be asked about are
+refused.
+.Sh TOOLS
+The model may call these tools; those marked with an asterisk are
+subject to the permission mode.
 .Bl -tag -width "write_file*"
 .It Cm read_file
 Read a file, with line numbers.
@@ -102,12 +146,25 @@ At the prompt:
 .Bl -tag -width "/clear"
 .It Cm /clear
 Forget the conversation.
+.It Cm /mode Op Cm ask | auto | yes
+Show or change the permission mode.
+The prompt shows it:
+.Sq auto>\ \&
+or
+.Sq yes>\ \&
+instead of
+.Sq >\ \& .
 .It Cm /help
 List the commands.
 .It Cm /exit
 Quit.
 So does end of input (control-D).
 .El
+.Pp
+Control-C stops the reply or command in progress and returns to the
+prompt; the text received so far is kept.
+A second control-C kills a command that ignores the first.
+At the prompt, control-C clears the line.
 .Sh ENVIRONMENT
 .Bl -tag -width ANTHROPIC_API_KEY
 .It Ev KRAFT_API
@@ -116,6 +173,9 @@ Default for
 .It Ev KRAFT_MODEL
 Default for
 .Fl m .
+.It Ev KRAFT_MODE
+Default for
+.Fl P .
 .It Ev KRAFT_URL
 Default for
 .Fl u .
@@ -142,8 +202,8 @@ the model.
 .Sh EXIT STATUS
 .Nm
 exits 0 on success, 100 on a permanent failure such as bad usage or
-a rejected request, and 111 on a temporary failure such as a
-network error.
+a rejected request, 111 on a temporary failure such as a network
+error, and 130 if a task given on the command line was interrupted.
 .Sh EXAMPLES
 Work with a model served by LM Studio on another machine:
 .Bd -literal -offset indent
@@ -156,7 +216,12 @@ kraft -u https://api.anthropic.com -m claude-opus-5 \e
     'make fails; find out why and fix it'
 .Ed
 .Sh BUGS
-Interrupting a reply with control-C ends
-.Nm
-rather than just the reply.
 The conversation is not saved between runs.
+.Pp
+The auto-mode rules judge commands by their text alone; a program
+on the list can still be made to do harm through a project's own
+files, such as a hostile
+.Pa Makefile .
+Use
+.Cm auto
+on code you trust.

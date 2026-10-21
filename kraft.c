@@ -16,6 +16,7 @@
 #include "http.h"
 #include "json.h"
 #include "oai.h"
+#include "perm.h"
 #include "proc.h"
 #include "scan.h"
 #include "sse.h"
@@ -34,8 +35,15 @@
 
 #define FATAL "kraft: fatal: "
 #define USAGE "kraft: usage: kraft [-ty] [-a anthropic|openai] [-m model] " \
-    "[-n max_tokens] [-u url] [task ...]"
+    "[-n max_tokens] [-P ask|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
+
+/* permission modes: when edits and commands need the user's approval */
+#define MODE_ASK 0   /* always */
+#define MODE_AUTO 1  /* unless perm_auto() allows them */
+#define MODE_YES 2   /* never */
+
+static const char *const modes[] = { "ask", "auto", "yes", 0 };
 
 static const struct api apis[] = {
   { "anthropic", "/v1/messages", "ANTHROPIC_API_KEY", "x-api-key: ",
@@ -47,7 +55,7 @@ static const struct api apis[] = {
 static const struct api *api;
 static const char *model, *base;
 static unsigned long max = 16384;
-static int showthink, yes, status;
+static int showthink, mode, status;
 static volatile sig_atomic_t intr;     /* ^C count during this task */
 static volatile sig_atomic_t curfd = -1;  /* the connection being read */
 static int allowed[32];  /* by tool index: approved for the session */
@@ -444,7 +452,14 @@ approve(const struct tool *t, const char *in, size_t n)
   size_t i = (size_t)(t - tool_all);
   int c;
 
-  if (!t->ask || yes || allowed[i]) return 1;
+  if (!t->ask || mode == MODE_YES || allowed[i]) return 1;
+  if (mode == MODE_AUTO) {
+    if (perm_auto(t->name, in, n, &tmp)) return 1;
+    if (!stralloc_0(&tmp)) nomem();
+    outs("  (auto mode asks: ");
+    outs(tmp.s);
+    outs(")\n");
+  }
   if (!str_diff(t->name, "bash")) {
     if (tool_arg(in, n, "command", &tmp)) lines("  $ ", tmp.s, tmp.len, 20);
   } else if (!str_diff(t->name, "edit_file")) {
@@ -457,7 +472,7 @@ approve(const struct tool *t, const char *in, size_t n)
   c = ui_ask("  Allow? [y]es, [n]o, [a]lways for this session: ");
   last = '\n';
   if (!c) {
-    outs("  (declined: no terminal to ask on; -y allows everything)\n");
+    outs("  (declined: no terminal to ask on; see -P)\n");
     return 0;
   }
   if (c == 'a') allowed[i] = 1;
@@ -577,8 +592,31 @@ help(void)
 {
   outs("Type a task and press return. Commands:\n"
       "  /clear  forget the conversation\n"
+      "  /mode   show or set when edits and commands need approval:\n"
+      "          /mode ask    always ask\n"
+      "          /mode auto   ask only when the auto-mode rules object\n"
+      "          /mode yes    never ask\n"
       "  /help   show this\n"
-      "  /exit   quit (or press ctrl-d)\n");
+      "  /exit   quit (or press ctrl-d)\n"
+      "^C stops the current reply or command.\n");
+}
+
+static int
+pickmode(const char *s)
+{
+  int i;
+
+  for (i = 0; modes[i]; ++i)
+    if (!str_diff(s, modes[i])) { mode = i; return 1; }
+  return 0;
+}
+
+static void
+showmode(void)
+{
+  outs("(permission mode: ");
+  outs(modes[mode]);
+  outs(")\n");
 }
 
 int
@@ -598,7 +636,9 @@ main(int argc, char **argv)
   aname = env("KRAFT_API", "anthropic");
   model = env("KRAFT_MODEL", 0);
   base = env("KRAFT_URL", "http://127.0.0.1:1234");
-  while ((opt = getopt(argc, argv, "a:m:n:tu:y")) != -1)
+  if (!pickmode(env("KRAFT_MODE", "ask")))
+    strerr_die(100, FATAL, "KRAFT_MODE must be ask, auto or yes", 0);
+  while ((opt = getopt(argc, argv, "a:m:n:P:tu:y")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
     case 'm': model = optarg; break;
@@ -606,9 +646,10 @@ main(int argc, char **argv)
       if (!*optarg || scan_ulong(optarg, &max) != str_len(optarg) || !max)
         strerr_die(100, USAGE, 0, 0);
       break;
+    case 'P': if (!pickmode(optarg)) strerr_die(100, USAGE, 0, 0); break;
     case 't': showthink = 1; break;
     case 'u': base = optarg; break;
-    case 'y': yes = 1; break;
+    case 'y': mode = MODE_YES; break;
     default: strerr_die(100, USAGE, 0, 0);
     }
   argv += optind;
@@ -666,9 +707,12 @@ main(int argc, char **argv)
     outs(model);
     outs(" at ");
     outs(base);
+    outs(", permission mode ");
+    outs(modes[mode]);
     outs(". /help for help.\n");
   }
-  while ((r = ui_readline(&line, "> "))) {
+  while ((r = ui_readline(&line, mode == MODE_AUTO ? "auto> " :
+      mode == MODE_YES ? "yes> " : "> "))) {
     if (r < 0) {  /* ^C at the prompt: start a fresh line */
       intr = 0;
       outs("\n");
@@ -685,6 +729,12 @@ main(int argc, char **argv)
     if (!str_diff(line.s, "/clear")) {
       while (conv.n) conv_drop(&conv);
       outs("(conversation cleared)\n");
+      continue;
+    }
+    if (!str_diff(line.s, "/mode")) { showmode(); continue; }
+    if (str_start(line.s, "/mode ")) {
+      if (!pickmode(line.s + 6)) outs("(modes are ask, auto and yes)\n");
+      else showmode();
       continue;
     }
     status = 0;

@@ -18,7 +18,7 @@ VERSION!=	cat VERSION
 LIBSRCS!=	echo src/*.c
 HDRS!=		echo include/*.h
 LIBOBJS=	${LIBSRCS:.c=.o}
-TESTS=		t/json t/sse t/conv
+TESTS=		t/json t/sse t/conv t/perm
 
 all: kraft
 
@@ -46,10 +46,14 @@ t/sse: t/sse.c libkraft.a
 t/conv: t/conv.c libkraft.a
 	${CC} ${CFLAGS} ${LDFLAGS} -o t/conv t/conv.c libkraft.a
 
+t/perm: t/perm.c libkraft.a
+	${CC} ${CFLAGS} ${LDFLAGS} -o t/perm t/perm.c libkraft.a
+
 test: ${TESTS}
 	./t/json
 	./t/sse
 	./t/conv
+	./t/perm
 
 install: kraft
 	mkdir -p ${DESTDIR}${BINDIR} ${DESTDIR}${MANDIR}/man1
