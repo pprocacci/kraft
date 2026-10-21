@@ -17,6 +17,15 @@ str(const char *d, size_t n, const char *path, stralloc *out)
   return json_unstr(out, v, vn) ? 1 : -1;
 }
 
+static int
+num(const char *d, size_t n, const char *path, unsigned long *u)
+{
+  const char *v;
+  size_t vn;
+
+  return json_get(d, n, path, &v, &vn) && scan_ulong(v, u) == vn;
+}
+
 static struct block *
 tool(struct msg *m, long idx)
 {
@@ -84,6 +93,14 @@ oai_event(struct msg *m, const char *d, size_t n, struct reply *r)
     if (str(d, n, "error.message", &r->err) <= 0)
       stralloc_cats(&r->err, "the server reported an error");
     return API_ERROR;
+  }
+  if (json_get(d, n, "usage", &v, &vn) && *v == '{') {
+    /* prompt_tokens includes any cached tokens; keep them apart */
+    num(v, vn, "prompt_tokens", &r->u.in);
+    num(v, vn, "completion_tokens", &r->u.out);
+    if (num(v, vn, "prompt_tokens_details.cached_tokens", &r->u.cread) &&
+        r->u.cread <= r->u.in)
+      r->u.in -= r->u.cread;
   }
   if (!json_get(d, n, "choices.0", &v, &vn)) return API_MORE;
 

@@ -32,7 +32,8 @@ oai_render(stralloc *o, const struct req *q)
   C(json_str(o, q->model, str_len(q->model)));
   C(stralloc_cats(o, ",\"max_tokens\":"));
   C(stralloc_catulong(o, q->max));
-  C(stralloc_cats(o, ",\"stream\":true"));
+  C(stralloc_cats(o, ",\"stream\":true,"
+      "\"stream_options\":{\"include_usage\":true}"));
   if (q->tools && q->tools->name) {
     C(stralloc_cats(o, ",\"tools\":["));
     for (t = q->tools; t->name; ++t) {

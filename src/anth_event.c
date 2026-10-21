@@ -36,6 +36,20 @@ num(const char *d, size_t n, const char *path, unsigned long *u)
   return json_get(d, n, path, &v, &vn) && scan_ulong(v, u) == vn;
 }
 
+/* takes whichever usage counts the object at path has */
+static void
+usage(const char *d, size_t n, const char *path, struct usage *u)
+{
+  const char *v;
+  size_t vn;
+
+  if (!json_get(d, n, path, &v, &vn)) return;
+  num(v, vn, "input_tokens", &u->in);
+  num(v, vn, "cache_read_input_tokens", &u->cread);
+  num(v, vn, "cache_creation_input_tokens", &u->cwrite);
+  num(v, vn, "output_tokens", &u->out);
+}
+
 static struct block *
 find(struct msg *m, unsigned long idx)
 {
@@ -117,6 +131,11 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
   if (json_is(v, vn, "message_delta")) {
     if (json_get(d, n, "delta.stop_reason", &v, &vn) && *v == '"')
       r->stop = stop(v, vn);
+    usage(d, n, "usage", &r->u);
+    return API_MORE;
+  }
+  if (json_is(v, vn, "message_start")) {
+    usage(d, n, "message.usage", &r->u);
     return API_MORE;
   }
   if (json_is(v, vn, "message_stop")) return API_DONE;
@@ -125,7 +144,7 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
       stralloc_cats(&r->err, "the server reported an error");
     return API_ERROR;
   }
-  return API_MORE;  /* message_start, content_block_stop, ping, ... */
+  return API_MORE;  /* content_block_stop, ping, ... */
 
 nomem:
   stralloc_copys(&r->err, "out of memory");

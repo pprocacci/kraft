@@ -42,7 +42,9 @@ static void
 anthropic(void)
 {
   static const char *ev[] = {
-    "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\"}}",
+    "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":"
+        "{\"input_tokens\":12,\"cache_read_input_tokens\":3000,"
+        "\"cache_creation_input_tokens\":40,\"output_tokens\":1}}}",
     "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":"
         "{\"type\":\"thinking\",\"thinking\":\"\"}}",
     "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":"
@@ -59,11 +61,12 @@ anthropic(void)
         "{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"comm\"}}",
     "{\"type\":\"content_block_delta\",\"index\":2,\"delta\":"
         "{\"type\":\"input_json_delta\",\"partial_json\":\"and\\\":\\\"ls\\\"}\"}}",
-    "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}",
+    "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},"
+        "\"usage\":{\"output_tokens\":77}}",
     0
   };
   struct conv c = { 0, 0, 0 };
-  struct reply r = { STRALLOC_ZERO, STRALLOC_ZERO, STRALLOC_ZERO, 0 };
+  struct reply r = { STRALLOC_ZERO, STRALLOC_ZERO, STRALLOC_ZERO, 0, { 0, 0, 0, 0 } };
   struct req q = { "m", 100, "sys", tool_all, 0 };
   stralloc o = STRALLOC_ZERO;
   struct msg *m;
@@ -80,6 +83,8 @@ anthropic(void)
   check(feed(anth_event, m, &r, "{\"type\":\"message_stop\"}") == API_DONE,
       "anth message_stop");
   check(r.stop == STOP_TOOL, "anth stop reason");
+  check(r.u.in == 12 && r.u.cread == 3000 && r.u.cwrite == 40 &&
+      r.u.out == 77, "anth usage");
   check(m->n == 3, "anth three blocks");
   check(m->b[0].type == BLK_THINK && is(&m->b[0].text, "hmm") &&
       is(&m->b[0].aux, "sig"), "anth thinking and signature");
@@ -100,7 +105,10 @@ anthropic(void)
       "anth tool_use input");
   check(has(&o, "{\"type\":\"tool_result\",\"tool_use_id\":\"tu_1\","
       "\"content\":\"a\\nb\"}"), "anth tool_result");
-  check(has(&o, "\"system\":\"sys\""), "anth system");
+  check(has(&o, "\"system\":[{\"type\":\"text\",\"text\":\"sys\","
+      "\"cache_control\":{\"type\":\"ephemeral\"}}]"), "anth system, cached");
+  check(has(&o, "\"stream\":true,\"cache_control\":{\"type\":\"ephemeral\"}"),
+      "anth automatic caching");
   check(feed(anth_event, m, &r, "{\"type\":\"error\",\"error\":{\"type\":"
       "\"overloaded_error\",\"message\":\"Overloaded\"}}") == API_ERROR &&
       is(&r.err, "Overloaded"), "anth error event");
@@ -122,7 +130,7 @@ openai(void)
     0
   };
   struct conv c = { 0, 0, 0 };
-  struct reply r = { STRALLOC_ZERO, STRALLOC_ZERO, STRALLOC_ZERO, 0 };
+  struct reply r = { STRALLOC_ZERO, STRALLOC_ZERO, STRALLOC_ZERO, 0, { 0, 0, 0, 0 } };
   struct req q = { "m", 100, "sys", tool_all, 0 };
   stralloc o = STRALLOC_ZERO;
   struct msg *m;
@@ -137,6 +145,10 @@ openai(void)
     if (feed(oai_event, m, &r, ev[i]) != API_MORE) ok = 0;
   check(ok, "oai chunks accepted");
   check(is(&r.think, ""), "oai reasoning only in its own chunk");
+  check(feed(oai_event, m, &r, "{\"choices\":[],\"usage\":{\"prompt_tokens\":"
+      "500,\"completion_tokens\":30,\"prompt_tokens_details\":"
+      "{\"cached_tokens\":400}}}") == API_MORE, "oai usage chunk");
+  check(r.u.in == 100 && r.u.cread == 400 && r.u.out == 30, "oai usage");
   check(feed(oai_event, m, &r, "[DONE]") == API_DONE, "oai [DONE]");
   check(r.stop == STOP_TOOL, "oai finish reason");
   check(m->n == 2 && m->b[0].type == BLK_TEXT && is(&m->b[0].text, "Let me"),

@@ -71,6 +71,22 @@ static struct reply reply;
 static stralloc host, path, hdrs, sys, body, event, data, line, tmp;
 static struct conv cconv;      /* the auto-mode check's own conversation */
 static stralloc rwhy, cwhy;    /* why the rules, and the check, said no */
+static const struct usage nousage;
+static struct usage total;     /* this session, all requests */
+static struct usage lastmain;  /* the last request of the main conversation */
+static unsigned long requests;
+
+/* adds the last request's usage to the session's */
+static void
+tally(int ismain)
+{
+  total.in += reply.u.in;
+  total.cread += reply.u.cread;
+  total.cwrite += reply.u.cwrite;
+  total.out += reply.u.out;
+  ++requests;
+  if (ismain) lastmain = reply.u;
+}
 
 /*
  * ^C: stop the reply by shutting its connection down, or stop the
@@ -340,6 +356,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   sse.p = sse.n = 0;
   sse.eof = 0;
   reply.stop = STOP_NONE;
+  reply.u = nousage;
   for (;;) {
     r = sse_get(&sse, &http, &event, &data);
     if (r < 0) {
@@ -372,11 +389,13 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
   }
   curfd = -1;
   close(fd);
+  tally(c == &conv);
   if (show) nl();
   flush();
   return 1;
 
 cut:
+  tally(c == &conv);
   keeptext(c);
 stopped:
   curfd = -1;
@@ -736,6 +755,7 @@ help(void)
       "          /mode auto   the rules, then a check by the model for\n"
       "                       what the rules cannot settle\n"
       "          /mode yes    never ask\n"
+      "  /usage  show tokens used this session, and cache hits\n"
       "  /help   show this\n"
       "  /exit   quit (or press ctrl-d)\n"
       "^C stops the current reply or command.\n");
@@ -749,6 +769,32 @@ pickmode(const char *s)
   for (i = 0; modes[i]; ++i)
     if (!str_diff(s, modes[i])) { mode = i; return 1; }
   return 0;
+}
+
+static void
+num(const char *a, unsigned long u, const char *b)
+{
+  if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, u) ||
+      !stralloc_0(&tmp))
+    nomem();
+  outs(a);
+  outs(tmp.s);
+  outs(b);
+}
+
+static void
+showusage(void)
+{
+  unsigned long in = total.in + total.cread + total.cwrite;
+
+  num("requests:      ", requests, "\n");
+  num("input tokens:  ", in, "");
+  num(" (", total.cread, " read from the cache, ");
+  num("", total.cwrite, " written to it)\n");
+  if (in) num("cache hits:    ", total.cread * 100 / in, "% of input\n");
+  num("output tokens: ", total.out, "\n");
+  num("context now:   ", lastmain.in + lastmain.cread + lastmain.cwrite,
+      " tokens, as of the last reply\n");
 }
 
 static void
@@ -874,6 +920,7 @@ main(int argc, char **argv)
       continue;
     }
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
+    if (!str_diff(line.s, "/usage")) { showusage(); continue; }
     if (str_start(line.s, "/mode ")) {
       if (!pickmode(line.s + 6)) outs("(modes are ask, auto and yes)\n");
       else showmode();

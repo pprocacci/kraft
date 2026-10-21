@@ -27,12 +27,21 @@ struct req {
   const struct conv *conv;
 };
 
+/* token counts for one request, as the server reports them */
+struct usage {
+  unsigned long in;      /* input not served from the cache */
+  unsigned long cread;   /* input read from the cache */
+  unsigned long cwrite;  /* input written to the cache */
+  unsigned long out;     /* output, reasoning included */
+};
+
 /* what one stream event produced, for display */
 struct reply {
   stralloc text;   /* reply text */
   stralloc think;  /* reasoning */
   stralloc err;    /* error message */
   int stop;
+  struct usage u;  /* filled in as the stream reports it */
 };
 
 struct api {

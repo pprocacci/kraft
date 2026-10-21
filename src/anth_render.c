@@ -55,7 +55,15 @@ block(stralloc *o, const struct block *b)
   return stralloc_cats(o, "}");
 }
 
-/* builds a streaming Anthropic Messages request */
+/*
+ * builds a streaming Anthropic Messages request.  for prompt caching
+ * the system prompt carries a breakpoint, which covers the tools
+ * too, and the top-level cache_control lets the server keep moving a
+ * second breakpoint to the end of the growing conversation.  both
+ * rely on everything before them being byte-identical from one
+ * request to the next: the conversation is append-only and the tools
+ * and system prompt never change during a session.
+ */
 int
 anth_render(stralloc *o, const struct req *q)
 {
@@ -68,10 +76,11 @@ anth_render(stralloc *o, const struct req *q)
   C(json_str(o, q->model, str_len(q->model)));
   C(stralloc_cats(o, ",\"max_tokens\":"));
   C(stralloc_catulong(o, q->max));
-  C(stralloc_cats(o, ",\"stream\":true"));
+  C(stralloc_cats(o, ",\"stream\":true,\"cache_control\":{\"type\":\"ephemeral\"}"));
   if (q->system) {
-    C(stralloc_cats(o, ",\"system\":"));
+    C(stralloc_cats(o, ",\"system\":[{\"type\":\"text\",\"text\":"));
     C(json_str(o, q->system, str_len(q->system)));
+    C(stralloc_cats(o, ",\"cache_control\":{\"type\":\"ephemeral\"}}]"));
   }
   if (q->tools && q->tools->name) {
     C(stralloc_cats(o, ",\"tools\":["));
