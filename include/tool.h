@@ -37,5 +37,10 @@ int tool_todo(const char *, size_t, stralloc *);
 int tool_jobout(const char *, size_t, stralloc *);
 int tool_jobkill(const char *, size_t, stralloc *);
 int tool_ask(const char *, size_t, stralloc *);
+int tool_symbols(const char *, size_t, stralloc *);
+
+/* Universal Ctags, for tool_symbols (devel/universal-ctags) */
+#define UCTAGS "/usr/local/bin/uctags"
+extern const struct tool tool_symbol;  /* offered when UCTAGS is there */
 
 #endif

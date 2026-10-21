@@ -11,9 +11,10 @@ settools(void)
 {
   size_t i, r;
 
-  for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 3; ++i)
+  for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 4; ++i)
     tools[i] = tool_all[i];
   tools[i++] = tasktool;
+  if (access(UCTAGS, X_OK) == 0) tools[i++] = tool_symbol;
   if (websearch) {
     if (pdfok)
       tools[i++] = searchtool;

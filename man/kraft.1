@@ -405,6 +405,13 @@ Search file contents with
 .Xr grep 1 .
 .It Cm list_dir
 List a directory.
+.It Cm symbols
+Find where functions, types, macros and the like are defined, by name
+or glob, kind and path, or outline a file, with
+.Xr uctags 1 .
+Offered only if
+.Pa devel/universal-ctags
+is installed.
 .It Cm web_fetch Ns *
 Fetch an http or https URL and return its text, HTML turned into
 plain text.
