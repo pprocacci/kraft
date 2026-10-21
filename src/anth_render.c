@@ -32,7 +32,9 @@ block(stralloc *o, const struct block *b)
     }
     break;
   case BLK_TOOL:
-    C(stralloc_cats(o, "{\"type\":\"tool_use\",\"id\":"));
+  case BLK_SERVER:
+    C(stralloc_cats(o, b->type == BLK_TOOL ? "{\"type\":\"tool_use\",\"id\":" :
+        "{\"type\":\"server_tool_use\",\"id\":"));
     C(json_str(o, b->id.s, b->id.len));
     C(stralloc_cats(o, ",\"name\":"));
     C(json_str(o, b->name.s, b->name.len));
@@ -70,7 +72,7 @@ anth_render(stralloc *o, const struct req *q)
   const struct tool *t;
   const struct msg *m;
   size_t i, j;
-  int first = 1, firstb;
+  int first = 1, firstb = 1, open = -1;
 
   C(stralloc_copys(o, "{\"model\":"));
   C(json_str(o, q->model, str_len(q->model)));
@@ -86,6 +88,10 @@ anth_render(stralloc *o, const struct req *q)
     C(stralloc_cats(o, ",\"tools\":["));
     for (t = q->tools; t->name; ++t) {
       if (t != q->tools) C(stralloc_cats(o, ","));
+      if (t->raw) {  /* a server tool: its definition as it stands */
+        C(stralloc_cats(o, t->raw));
+        continue;
+      }
       C(stralloc_cats(o, "{\"name\":"));
       C(json_str(o, t->name, str_len(t->name)));
       C(stralloc_cats(o, ",\"description\":"));
@@ -101,19 +107,28 @@ anth_render(stralloc *o, const struct req *q)
     m = &q->conv->m[i];
     for (j = 0; j < m->n && !shown(&m->b[j]); ++j) ;
     if (j == m->n) continue;
-    if (!first) C(stralloc_cats(o, ","));
-    first = 0;
-    C(stralloc_cats(o, m->role == ROLE_USER ? "{\"role\":\"user\"" :
-        "{\"role\":\"assistant\""));
-    C(stralloc_cats(o, ",\"content\":["));
-    firstb = 1;
+    /*
+     * consecutive messages with one role become one message: after a
+     * pause_turn the server's continuation is a second assistant
+     * message
+     */
+    if (open != m->role) {
+      if (open != -1) C(stralloc_cats(o, "]}"));
+      if (!first) C(stralloc_cats(o, ","));
+      first = 0;
+      C(stralloc_cats(o, m->role == ROLE_USER ? "{\"role\":\"user\"" :
+          "{\"role\":\"assistant\""));
+      C(stralloc_cats(o, ",\"content\":["));
+      firstb = 1;
+      open = m->role;
+    }
     for (j = 0; j < m->n; ++j) {
       if (!shown(&m->b[j])) continue;
       if (!firstb) C(stralloc_cats(o, ","));
       firstb = 0;
       C(block(o, &m->b[j]));
     }
-    C(stralloc_cats(o, "]}"));
   }
+  if (open != -1) C(stralloc_cats(o, "]}"));
   return stralloc_cats(o, "]}");
 }

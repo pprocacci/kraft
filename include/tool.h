@@ -15,6 +15,7 @@ struct tool {
   const char *schema;  /* JSON Schema of the input */
   int ask;             /* needs the user's approval */
   int (*run)(const char *, size_t, stralloc *);
+  const char *raw;     /* a server tool's whole definition, or 0 */
 };
 
 extern const struct tool tool_all[];  /* ends with a null name */
@@ -33,5 +34,8 @@ int tool_ls(const char *, size_t, stralloc *);
 int tool_fetch(const char *, size_t, stralloc *);
 int tool_multiedit(const char *, size_t, stralloc *);
 int tool_todo(const char *, size_t, stralloc *);
+int tool_jobout(const char *, size_t, stralloc *);
+int tool_jobkill(const char *, size_t, stralloc *);
+int tool_ask(const char *, size_t, stralloc *);
 
 #endif

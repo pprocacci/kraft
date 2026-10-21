@@ -36,8 +36,10 @@ oai_render(stralloc *o, const struct req *q)
       "\"stream_options\":{\"include_usage\":true}"));
   if (q->tools && q->tools->name) {
     C(stralloc_cats(o, ",\"tools\":["));
+    firstt = 1;
     for (t = q->tools; t->name; ++t) {
-      if (t != q->tools) C(stralloc_cats(o, ","));
+      if (t->raw) continue;  /* Anthropic server tools mean nothing here */
+      C(sep(o, &firstt));
       C(stralloc_cats(o, "{\"type\":\"function\",\"function\":{\"name\":"));
       C(json_str(o, t->name, str_len(t->name)));
       C(stralloc_cats(o, ",\"description\":"));

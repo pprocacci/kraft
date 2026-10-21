@@ -6,7 +6,7 @@
 .Nd coding agent
 .Sh SYNOPSIS
 .Nm
-.Op Fl rty
+.Op Fl rtwy
 .Op Fl a Ar api
 .Op Fl c Ar tokens
 .Op Fl m Ar model
@@ -92,6 +92,13 @@ When tool calls that change things need your approval; see
 .Sx PERMISSIONS .
 The default is
 .Cm ask .
+.It Fl w
+Let the model search the web, with the Anthropic API's own search
+tool.
+The searches run on Anthropic's servers, so they cannot be put to
+you first; that is why this is not the default.
+Only for
+.Pa https://api.anthropic.com .
 .It Fl y
 The same as
 .Fl P Cm yes .
@@ -188,7 +195,7 @@ dumps.
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.
-.Bl -tag -width "write_file*"
+.Bl -tag -width "bash_output"
 .It Cm read_file
 Read a file, with line numbers.
 .It Cm write_file Ns *
@@ -197,9 +204,19 @@ Create or replace a file.
 Replace text in a file.
 The text must match exactly and, unless all occurrences are to be
 replaced, occur exactly once.
+.It Cm multi_edit Ns *
+Make several such replacements in one file, all or none.
 .It Cm bash Ns *
 Run a command with
-.Pa /bin/sh .
+.Pa /bin/sh ,
+or start it in the background.
+.It Cm bash_output
+Read a background command's new output, waiting for some if need be.
+.It Cm bash_kill
+Stop a background command.
+Background commands are stopped when
+.Nm
+exits.
 .It Cm find_files
 Find files by name.
 .It Cm grep
@@ -207,6 +224,19 @@ Search file contents with
 .Xr grep 1 .
 .It Cm list_dir
 List a directory.
+.It Cm web_fetch Ns *
+Fetch an http or https URL and return its text, HTML turned into
+plain text.
+.It Cm todo
+Keep a checklist for a task of several steps, shown as it changes.
+.It Cm ask_user
+Ask you a question, with possible answers to choose from, and wait
+for the answer.
+.It Cm web_search
+Search the web.
+Offered only with
+.Fl w
+on the Anthropic API.
 .El
 .Sh COMMANDS
 At the prompt:

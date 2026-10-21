@@ -68,6 +68,7 @@ stop(const char *v, size_t n)
   if (json_is(v, n, "tool_use")) return STOP_TOOL;
   if (json_is(v, n, "max_tokens")) return STOP_MAX;
   if (json_is(v, n, "refusal")) return STOP_REFUSAL;
+  if (json_is(v, n, "pause_turn")) return STOP_PAUSE;
   return STOP_OTHER;
 }
 
@@ -99,12 +100,19 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
       if (!(b = conv_block(m, BLK_THINK))) goto nomem;
       k = str2(cb, cn, "thinking", &b->text, &r->think);
       if (k >= 0) k = str(cb, cn, "signature", &b->aux);
-    } else if (json_is(v, vn, "tool_use")) {
-      if (!(b = conv_block(m, BLK_TOOL))) goto nomem;
+    } else if (json_is(v, vn, "tool_use") ||
+        json_is(v, vn, "server_tool_use")) {
+      if (!(b = conv_block(m, json_is(v, vn, "tool_use") ? BLK_TOOL :
+          BLK_SERVER)))
+        goto nomem;
       k = str(cb, cn, "id", &b->id);
       if (k >= 0) k = str(cb, cn, "name", &b->name);
+      /* the input usually streams in; take it here if it came whole */
+      if (k >= 0 && json_get(cb, cn, "input", &v, &vn) && json_object(v, vn) &&
+          !(vn == 2 && v[1] == '}') && !stralloc_copyb(&b->text, v, vn))
+        goto nomem;
     } else {
-      /* redacted_thinking, server tool blocks: keep them verbatim */
+      /* redacted_thinking, server tool results: keep them verbatim */
       if (!(b = conv_block(m, BLK_RAW))) goto nomem;
       if (!stralloc_copyb(&b->text, cb, cn)) goto nomem;
     }
@@ -115,6 +123,7 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
 
   if (json_is(v, vn, "content_block_delta")) {
     if (!num(d, n, "index", &idx) || !(b = find(m, idx))) goto bad;
+    if (b->type == BLK_RAW) return API_MORE;  /* complete as it came */
     if (!json_get(d, n, "delta.type", &v, &vn)) goto bad;
     if (json_is(v, vn, "text_delta"))
       k = str2(d, n, "delta.text", &b->text, &r->text);
@@ -125,6 +134,20 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
     else if (json_is(v, vn, "input_json_delta"))
       k = str(d, n, "delta.partial_json", &b->text);
     if (k < 0) goto bad;
+    return API_MORE;
+  }
+
+  if (json_is(v, vn, "content_block_stop")) {
+    /* show the user what a server tool is doing, such as a web search */
+    if (num(d, n, "index", &idx) && (b = find(m, idx)) &&
+        b->type == BLK_SERVER) {
+      stralloc_cats(&r->text, "\n* ");
+      stralloc_cat(&r->text, &b->name);
+      stralloc_cats(&r->text, "(");
+      if (json_get(b->text.s, b->text.len, "query", &v, &vn) && *v == '"')
+        json_unstr(&r->text, v, vn);
+      stralloc_cats(&r->text, ")\n");
+    }
     return API_MORE;
   }
 
@@ -144,7 +167,7 @@ anth_event(struct msg *m, const char *d, size_t n, struct reply *r)
       stralloc_cats(&r->err, "the server reported an error");
     return API_ERROR;
   }
-  return API_MORE;  /* content_block_stop, ping, ... */
+  return API_MORE;  /* message_start was above; ping, ... */
 
 nomem:
   stralloc_copys(&r->err, "out of memory");

@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <string.h>
+#include "job.h"
 #include "proc.h"
 #include "stralloc.h"
 #include "tool.h"
@@ -18,6 +19,19 @@ tool_bash(const char *in, size_t n, stralloc *out)
   if (!tool_arg(in, n, "command", &cmd)) {
     stralloc_copys(out, "command is required");
     return 0;
+  }
+  if (tool_argflag(in, n, "background")) {
+    int id;
+
+    stralloc_copys(out, "");
+    if (!(id = job_start(cmd.s, out))) goto out;
+    stralloc_copys(out, "started background job ");
+    stralloc_catulong(out, (unsigned long)id);
+    stralloc_cats(out, "; read its output with bash_output (id ");
+    stralloc_catulong(out, (unsigned long)id);
+    stralloc_cats(out, ") and stop it with bash_kill");
+    ok = 1;
+    goto out;
   }
   tool_argnum(in, n, "timeout", &secs);
   if (!secs) secs = 120;

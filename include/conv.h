@@ -18,6 +18,7 @@
 #define BLK_TOOL 2    /* id, name; text: input as JSON */
 #define BLK_RESULT 3  /* id; text: tool output; iserr */
 #define BLK_RAW 4     /* text: a raw Anthropic content block, sent back as is */
+#define BLK_SERVER 5  /* id, name; text: input as JSON (Anthropic server tool) */
 
 struct block {
   int type;

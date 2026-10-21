@@ -18,6 +18,7 @@
 #include "conv.h"
 #include "file.h"
 #include "http.h"
+#include "job.h"
 #include "json.h"
 #include "oai.h"
 #include "perm.h"
@@ -38,7 +39,7 @@
 #endif
 
 #define FATAL "kraft: fatal: "
-#define USAGE "kraft: usage: kraft [-rty] [-a anthropic|openai] [-c tokens] " \
+#define USAGE "kraft: usage: kraft [-rtwy] [-a anthropic|openai] [-c tokens] " \
     "[-m model] " \
     "[-n max_tokens] [-P ask|rules|auto|yes] [-u url] [task ...]"
 #define MAXSTEPS 100  /* model requests per task */
@@ -66,7 +67,15 @@ static unsigned long max = 16384;
 static int showthink, mode, status;
 static volatile sig_atomic_t intr;     /* ^C count during this task */
 static volatile sig_atomic_t curfd = -1;  /* the connection being read */
-static int allowed[32];  /* by tool index: approved for the session */
+static struct tool tools[40];  /* this session's: tool_all, and server tools */
+static int allowed[40];  /* by tool index: approved for the session */
+static int websearch;    /* -w: offer Anthropic's server-side web search */
+
+/* Anthropic's web search; it runs on their servers, so it cannot be asked about */
+static const struct tool searchtool = {
+  "web_search", 0, 0, 0, 0,
+  "{\"type\":\"web_search_20260209\",\"name\":\"web_search\",\"max_uses\":5}"
+};
 static char last = '\n';  /* last byte written to stdout */
 
 static struct url url;
@@ -361,6 +370,7 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
 {
   struct req q;
   struct msg *m;
+  size_t i;
   int fd, r;
 
   q.model = mdl;
@@ -445,7 +455,10 @@ exchange(struct conv *c, const char *sysp, const struct tool *tools,
       buffer_flush(buffer_2);
     }
     if (show && reply.text.len) {
-      out(reply.text.s, reply.text.len);
+      /* a server tool's "\n* name(...)" line needs no blank line before it */
+      i = last == '\n' && reply.text.len > 2 &&
+          !byte_diff(reply.text.s, 3, "\n* ");
+      out(reply.text.s + i, reply.text.len - i);
       flush();
     }
     if (r == API_ERROR) {
@@ -564,7 +577,7 @@ compact(int carry)
       "summary is all that will be kept. Do not call any tools.]"))
     nomem();
   overflow = 0;
-  r = exchange(&conv, sys.s, tool_all, model, max, 0);
+  r = exchange(&conv, sys.s, tools, model, max, 0);
   if (r > 0) {
     m = &conv.m[conv.n - 1];
     for (i = 0; i < m->n; ++i)
@@ -801,6 +814,7 @@ static void
 announce(const struct block *b, const char *in, size_t n)
 {
   static const char *keys[] = { "command", "path", "pattern", "url", 0 };
+  unsigned long u;
   size_t i, k;
 
   nl();
@@ -813,11 +827,17 @@ announce(const struct block *b, const char *in, size_t n)
     for (k = 0; k < tmp.len && k < 100; ++k)
       out(tmp.s[k] == '\n' ? " " : tmp.s + k, 1);
     if (tmp.len > 100) outs("...");
-  }
+  } else if (tool_argnum(in, n, "id", &u)) {
+    if (!stralloc_copys(&tmp, "") || !stralloc_catulong(&tmp, u) ||
+        !stralloc_0(&tmp))
+      nomem();
+    outs(tmp.s);
+  } else if (tool_arg(in, n, "question", &tmp))
+    out(tmp.s, tmp.len > 100 ? 100 : tmp.len);
   outs(")\n");
 }
 
-static const struct tool notools[] = { { 0, 0, 0, 0, 0 } };
+static const struct tool notools[] = { { 0, 0, 0, 0, 0, 0 } };
 
 static const char checksys[] =
     "You review actions that a coding agent wants to take on the user's "
@@ -936,7 +956,7 @@ check(const struct tool *t, const char *in, size_t n)
 static int
 approve(const struct tool *t, const char *in, size_t n)
 {
-  size_t i = (size_t)(t - tool_all);
+  size_t i = (size_t)(t - tools);
   int c, r;
 
   if (!t->ask || mode == MODE_YES || allowed[i]) return 1;
@@ -1023,7 +1043,7 @@ runtools(int cut)
     if (!stralloc_copyb(&res->id, b->id.s, b->id.len)) nomem();
     in = b->text.len ? b->text.s : "{}";
     n = b->text.len ? b->text.len : 2;
-    for (t = tool_all; t->name; ++t)
+    for (t = tools; t->name; ++t)
       if (str_len(t->name) == b->name.len &&
           !byte_diff(t->name, b->name.len, b->name.s))
         break;
@@ -1092,13 +1112,13 @@ work(const char *s, size_t n)
   for (step = 0; step < MAXSTEPS; ++step) {
     /* compact before the conversation outgrows three quarters of the window */
     if (ctxwin && estimate() > ctxwin / 4 * 3 && !compact(1)) return;
-    r = exchange(&conv, sys.s, tool_all, model, max, 1);
+    r = exchange(&conv, sys.s, tools, model, max, 1);
     if (!r && overflow && !retried) {
       /* the server says it is too long after all: compact, try again */
       overflow = 0;
       retried = 1;
       if (!compact(1)) return;
-      r = exchange(&conv, sys.s, tool_all, model, max, 1);
+      r = exchange(&conv, sys.s, tools, model, max, 1);
     }
     if (!r && overflow) {
       warn("the conversation is too long for the model; /clear starts "
@@ -1110,6 +1130,10 @@ work(const char *s, size_t n)
     if (!r) return;
     m = &conv.m[conv.n - 1];
     if (reply.stop == STOP_REFUSAL) warn("the model declined this request", 0, 0);
+    if (reply.stop == STOP_PAUSE && !hastools(m)) {
+      save();
+      continue;  /* a server tool is still at work: send it all back */
+    }
     if (!hastools(m)) {
       if (reply.stop == STOP_MAX)
         warn("the reply was cut off at max_tokens; raise it with -n", 0, 0);
@@ -1214,6 +1238,7 @@ main(int argc, char **argv)
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;  /* no SA_RESTART: blocked calls must return EINTR */
   sigaction(SIGINT, &sa, 0);
+  atexit(job_killall);  /* background commands do not outlive kraft */
   aname = env("KRAFT_API", "anthropic");
   model = env("KRAFT_MODEL", 0);
   base = env("KRAFT_URL", "http://127.0.0.1:1234");
@@ -1222,7 +1247,7 @@ main(int argc, char **argv)
   if ((key = env("KRAFT_CONTEXT", 0)) &&
       (scan_ulong(key, &ctxwin) != str_len(key) || !ctxwin))
     strerr_die(100, FATAL, "KRAFT_CONTEXT must be a number of tokens", 0);
-  while ((opt = getopt(argc, argv, "a:c:m:n:P:rtu:y")) != -1)
+  while ((opt = getopt(argc, argv, "a:c:m:n:P:rtu:wy")) != -1)
     switch (opt) {
     case 'a': aname = optarg; break;
     case 'c':
@@ -1237,6 +1262,7 @@ main(int argc, char **argv)
       break;
     case 'P': if (!pickmode(optarg)) strerr_die(100, USAGE, 0, 0); break;
     case 'r': again = 1; break;
+    case 'w': websearch = 1; break;
     case 't': showthink = 1; break;
     case 'u': base = optarg; break;
     case 'y': mode = MODE_YES; break;
@@ -1289,6 +1315,16 @@ main(int argc, char **argv)
   forget("ANTHROPIC_AUTH_TOKEN");
   forget("OPENAI_API_KEY");
   mksystem();
+  /* the tools for the whole session: changing them would spoil the cache */
+  for (i = 0; tool_all[i].name && i < sizeof tools / sizeof tools[0] - 2; ++i)
+    tools[i] = tool_all[i];
+  if (websearch) {
+    if (api->render == anth_render && !str_diff(url.host.s, "api.anthropic.com"))
+      tools[i++] = searchtool;
+    else
+      warn("-w needs the Anthropic API at api.anthropic.com; ignored", 0, 0);
+  }
+  tools[i].name = 0;
   if (!ctxwin) findwindow();
   if (!stralloc_copys(&cwdsa, getcwd(cwd, sizeof cwd) ? cwd : ".") ||
       !stralloc_0(&cwdsa))

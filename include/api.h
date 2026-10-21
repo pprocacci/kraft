@@ -18,6 +18,7 @@
 #define STOP_MAX 3      /* hit max_tokens */
 #define STOP_REFUSAL 4  /* declined */
 #define STOP_OTHER 5
+#define STOP_PAUSE 6    /* a server tool paused the turn: send it back to go on */
 
 struct req {
   const char *model;
