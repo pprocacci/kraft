@@ -56,6 +56,10 @@ earlier ones, and saved, so that
 .Fl r
 can resume it.
 .Pp
+In a git repository, the model is told the branch, the status and
+the recent commits as they were at the start, and a task that changes
+the uncommitted state ends with a summary of it.
+.Pp
 When the conversation grows to about three quarters of the model's
 context window,
 .Nm
@@ -395,6 +399,14 @@ and
 can be undone, not what commands did.
 .It Cm /rules
 List the permission rules in force, and where each came from.
+.It Cm /diff
+Show the uncommitted changes, in a git repository.
+.It Cm /commit
+Have the model look at the uncommitted changes and commit them, with
+a message in the style of the repository's recent ones.
+It does not push.
+The commit is a command like any other, subject to the permission
+mode.
 .It Cm /usage
 Show the tokens used this session: input, how much of it was read
 from or written to the prompt cache, output, and roughly how full

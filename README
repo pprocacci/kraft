@@ -4,11 +4,88 @@ You describe a task; the model reads and changes files and runs
 commands to do it, asking before anything that changes the system.
 It speaks the Anthropic Messages API and OpenAI-compatible Chat
 Completions APIs, so it works with Claude and with local servers
-such as LM Studio, llama.cpp and vLLM.
+such as LM Studio, llama.cpp, vLLM and Ollama.
+
+Building
+--------
 
   make && make test
-  ./kraft -u http://host:1234 -m some-model
-  ./kraft -u https://api.anthropic.com -m claude-opus-5 'fix the build'
-  ./kraft -a openai -u http://host:1234/v1 -m some-model
+  make install            # PREFIX=/usr/local by default
 
-See kraft(1) and HACKING.
+or from the ports overlay: devel/kraft.  Needs only the base system
+(libedit and OpenSSL); pdftotext (graphics/poppler-utils) is optional,
+for reading PDFs with servers that cannot take them.
+
+Claude, through the Anthropic API
+---------------------------------
+
+Put your API key in ~/.kraft/anthropic.key, readable only by you (or
+set ANTHROPIC_API_KEY):
+
+  mkdir -p ~/.kraft && chmod 700 ~/.kraft
+  printf '%s\n' 'sk-ant-...' > ~/.kraft/anthropic.key
+  chmod 600 ~/.kraft/anthropic.key
+
+Then, in a project:
+
+  kraft -u https://api.anthropic.com -m claude-opus-5
+  kraft -u https://api.anthropic.com -m claude-opus-5 'make fails; fix it'
+  kraft -u https://api.anthropic.com -m claude-opus-5 -w   # with web search
+
+With Claude, requests use prompt caching, PDFs are read as documents,
+and -w lets the model search the web.
+
+A local model with LM Studio (or anything OpenAI-compatible)
+------------------------------------------------------------
+
+LM Studio serves both API formats; kraft speaks the Anthropic one by
+default:
+
+  kraft -u http://192.168.1.10:1234 -m qwen/qwen3.8-27b
+  kraft -a openai -u http://192.168.1.10:1234/v1 -m qwen/qwen3.8-27b
+
+For llama.cpp, vLLM, Ollama and other OpenAI-compatible servers, use
+-a openai with the server's base URL.  If the server's API key is
+needed, put it in ~/.kraft/openai.key or OPENAI_API_KEY.
+
+Settings
+--------
+
+Rather than flags every time, ~/.kraft/config:
+
+  url https://api.anthropic.com
+  model claude-opus-5
+  mode auto
+  allow bash make test*
+  allow edit src/*
+  deny bash git push*
+
+Then plain `kraft` will do.  A project may have a .kraft/config of
+its own; kraft asks before using one, and again if it changes.
+
+Permission modes (-P, or "mode" in the config):
+
+  ask     ask before every edit and command (the default)
+  rules   allow what fixed safety rules find harmless; ask about the rest
+  auto    the rules, then a check by the model for what they cannot settle
+  yes     never ask (only where the model can do no harm)
+
+At an approval prompt: y yes, n no, a always this session, p always
+here (saved as a rule in .kraft/config).  ^C stops the reply or
+command in progress.
+
+At the prompt
+-------------
+
+  @file.png       attach an image (or, with Claude, a PDF) to a task
+  ... \           end a line with a backslash to go on to the next
+  /undo           put back the files the last task changed
+  /diff /commit   see the uncommitted changes, or have them committed
+  /compact        summarize the conversation to save context
+  /usage          tokens, cache hits, context use
+  /rules /mode    the permission rules, and the mode
+  /help           all of them
+
+kraft -r resumes the last session in the current directory.
+
+See kraft(1) for everything, and HACKING for how the code is laid out.

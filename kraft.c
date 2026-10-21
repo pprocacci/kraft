@@ -322,6 +322,99 @@ readkey(void)
   return key.s;
 }
 
+/*
+ * Git.  In a repository, the system prompt says where things stood
+ * at the start, each task ends with a summary of the uncommitted
+ * changes if it made any, and /diff and /commit are at hand.
+ */
+
+static int ingit;  /* the working directory is in a git work tree */
+
+/* runs cmd with /bin/sh, its output into out; 1 if it exited 0 */
+static int
+sh(const char *cmd, stralloc *out)
+{
+  char *argv[4];
+  int status;
+
+  argv[0] = "/bin/sh";
+  argv[1] = "-c";
+  argv[2] = (char *)cmd;
+  argv[3] = 0;
+  if (!stralloc_copys(out, "")) nomem();
+  if (!proc_run(argv, 30, 1024 * 1024, out, &status)) return 0;
+  while (out->len && out->s[out->len - 1] == '\n') --out->len;
+  if (!stralloc_0(out)) nomem();
+  --out->len;
+  return status == 0;
+}
+
+/* adds the repository's state to the system prompt s */
+static void
+gitcontext(stralloc *s)
+{
+  stralloc o = STRALLOC_ZERO;
+
+  ingit = sh("git rev-parse --is-inside-work-tree 2>/dev/null", &o) &&
+      !str_diff(o.s, "true");
+  if (!ingit) goto out;
+  if (!stralloc_cats(s, "\n\nThe working directory is in a git repository. "
+      "As it was when this session began:\n"))
+    nomem();
+  if (sh("git branch --show-current 2>/dev/null", &o) && o.len &&
+      (!stralloc_cats(s, "\nCurrent branch: ") || !stralloc_cat(s, &o)))
+    nomem();
+  if (sh("git status --short 2>/dev/null | head -30", &o) &&
+      (!stralloc_cats(s, "\n\nStatus:\n") ||
+      !stralloc_cats(s, o.len ? o.s : "(clean)")))
+    nomem();
+  if (sh("git log --oneline -5 2>/dev/null", &o) && o.len &&
+      (!stralloc_cats(s, "\n\nRecent commits:\n") || !stralloc_cat(s, &o)))
+    nomem();
+out:
+  stralloc_free(&o);
+}
+
+/* the uncommitted changes in short: "2 files changed, ..." */
+static void
+gitstat(stralloc *out)
+{
+  size_t i;
+
+  if (!ingit || !sh("git diff --shortstat HEAD 2>/dev/null", out)) {
+    if (!stralloc_copys(out, "") || !stralloc_0(out)) nomem();
+    return;
+  }
+  for (i = 0; i < out->len && out->s[i] == ' '; ++i) ;
+  byte_copy(out->s, out->len - i + 1, out->s + i);
+  out->len -= i;
+}
+
+static void
+showdiff(void)
+{
+  stralloc o = STRALLOC_ZERO;
+
+  if (!ingit) { outs("(not in a git repository)\n"); return; }
+  sh(color ? "git -c color.ui=always status --short; echo; "
+      "git -c color.ui=always --no-pager diff HEAD" :
+      "git status --short; echo; git --no-pager diff HEAD", &o);
+  if (!o.len) outs("(no uncommitted changes)\n");
+  else {
+    raw(o.s, o.len);
+    outs("\n");
+  }
+  stralloc_free(&o);
+}
+
+static const char commitprompt[] =
+    "Commit the uncommitted changes in this repository. First look at them "
+    "with git status and git diff, and at git log -5 for this repository's "
+    "style of commit message. Then stage what belongs in the commit (leave "
+    "out anything that looks unrelated or accidental, such as build output, "
+    "and tell me about it) and commit it with git commit, with a message "
+    "that says what changed and why, in that style. Do not push.";
+
 static void
 mksystem(void)
 {
@@ -358,6 +451,7 @@ mksystem(void)
       nomem();
   }
   stralloc_free(&md);
+  gitcontext(&sys);
   if (!stralloc_0(&sys)) nomem();
 }
 
@@ -1722,8 +1816,23 @@ work(const char *s, size_t n)
 static void
 task(const char *s, size_t n)
 {
+  static stralloc before, after;
+
+  gitstat(&before);
   work(s, n);
   save();
+  /* what the task left uncommitted, if it changed that */
+  gitstat(&after);
+  if (after.len && str_diff(before.s, after.s)) {
+    nl();
+    sgr(DIM);
+    outs("  git: ");
+    outs(after.s);
+    outs(" (uncommitted; /diff to see)");
+    sgr(0);
+    outs("\n");
+    flush();
+  }
 }
 
 static void
@@ -1742,6 +1851,8 @@ help(void)
       "            further back); changes made by commands are not undone\n"
       "  /usage    show tokens used, cache hits, and context size\n"
       "  /rules    list the allow and deny rules from the config files\n"
+      "  /diff     show the uncommitted changes (in a git repository)\n"
+      "  /commit   have the model commit them, with a fitting message\n"
       "  /help     show this\n"
       "  /exit     quit (or press ctrl-d)\n"
       "^C stops the current reply or command.\n");
@@ -2504,6 +2615,15 @@ main(int argc, char **argv)
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
     if (!str_diff(line.s, "/usage")) { showusage(); continue; }
     if (!str_diff(line.s, "/rules")) { showrules(); continue; }
+    if (!str_diff(line.s, "/diff")) { showdiff(); continue; }
+    if (!str_diff(line.s, "/commit")) {
+      if (!ingit) { outs("(not in a git repository)\n"); continue; }
+      status = 0;
+      task(commitprompt, sizeof commitprompt - 1);
+      nl();
+      flush();
+      continue;
+    }
     if (!str_diff(line.s, "/undo")) {
       if (undo()) save();
       else outs("(nothing to undo)\n");
