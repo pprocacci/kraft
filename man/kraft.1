@@ -360,6 +360,45 @@ No rule can allow changing a
 .Pa .kraft
 directory.
 .Pp
+Hooks are commands, run with
+.Pa /bin/sh
+in the current directory, around the model's tool calls:
+.Bl -tag -width "hook before tool command"
+.It Cm hook before Ar tool command
+runs before each call of a tool that
+.Ar tool
+matches (as for rules), once it is allowed.
+If it fails, the call is not made, and what it printed goes to the
+model as the reason.
+.It Cm hook after Ar tool command
+runs after each such call; what it prints is added to the result the
+model sees.
+.It Cm hook done Ar command
+runs when a task is over, and what it prints is shown.
+.El
+.Pp
+The call is described to them in the environment:
+.Ev KRAFT_TOOL ,
+.Ev KRAFT_INPUT
+(its JSON),
+.Ev KRAFT_PATH
+and
+.Ev KRAFT_COMMAND
+(if it has a path or a command),
+and, after it,
+.Ev KRAFT_RESULT
+and
+.Ev KRAFT_FAILED
+(1 if it failed; for
+.Cm done ,
+if the task did).
+For example:
+.Bd -literal -offset indent
+hook after edit case "$KRAFT_PATH" in *.c) clang-format -i "$KRAFT_PATH";; esac
+hook before bash ! echo "$KRAFT_COMMAND" | grep -q sudo
+hook done printf '\ea'
+.Ed
+.Pp
 A project's
 .Pa .kraft/config
 is used only once you have trusted it: kraft shows it and asks the

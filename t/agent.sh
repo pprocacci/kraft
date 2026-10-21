@@ -188,6 +188,32 @@ err "not run: the reply was cut off"
 err "raise it with -n"
 reqs 1
 
+setup "hooks: before blocks, after reports, done runs" <<EOF
+reply
+tool bash {"command":"rm -f keep"}
+tool bash {"command":"echo fine"}
+tool write_file {"path":"c.txt","content":"x"}
+reply
+text OK.
+EOF
+cat > "$T/home/.kraft/config" <<'CFG'
+hook before bash case "$KRAFT_COMMAND" in *rm*) echo no removing; exit 1;; esac
+hook after edit echo "checked $KRAFT_PATH, failed=$KRAFT_FAILED"
+hook after mcp__* echo never
+hook done echo "task over, failed=$KRAFT_FAILED"
+CFG
+touch "$P/keep"
+run -P yes -p "go"
+status 0
+
+[ -f "$P/keep" ] || fail "the blocked rm ran"
+req 2 "blocked by the user's hook"
+req 2 "no removing"
+req 2 "fine"
+req 2 "checked c.txt, failed=0"
+! grep -q never "$T/log/2" || fail "a hook for another tool ran"
+err "task over, failed=0"
+
 setup "-j: the outcome as JSON" <<EOF
 reply
 tool read_file {"path":"nope.txt"}

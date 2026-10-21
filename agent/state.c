@@ -243,3 +243,7 @@ struct tool restool = {
   "\"required\":[\"server\",\"uri\"]}",
   0, readresource, 0, 0, 0
 };
+
+/* hooks, from the config */
+struct hook hooks[MAXHOOKS];
+unsigned long nhooks;

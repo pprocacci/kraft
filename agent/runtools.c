@@ -18,6 +18,7 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
   const char *in;
   size_t i, n;
   int r, snap;
+  static stralloc hookout;
 
   if (!(u = conv_msg(c, ROLE_USER))) nomem();
   a = &c->m[c->n - 2];
@@ -53,7 +54,11 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
       stralloc_copys(&res->text, intr ? "not run: the user interrupted" :
           ruledeny.len ? ruledeny.s :
           "the user declined this call; ask them what to do instead");
-    else if (!str_diff(t->name, "read_file") && tool_arg(in, n, "path", &tmp) &&
+    else if (nhooks && !hook(HOOK_BEFORE, t, in, n, 0, 0, &hookout)) {
+      if (!stralloc_copys(&res->text, "blocked by the user's hook:\n") ||
+          !stralloc_cat(&res->text, &hookout))
+        nomem();
+    } else if (!str_diff(t->name, "read_file") && tool_arg(in, n, "path", &tmp) &&
         stralloc_copys(&mwhy, "") &&
         (r = attach(u, &b->id, tmp.s, &mwhy)) != 0) {
       /* an image (or PDF): the model sees the thing itself */
@@ -79,6 +84,12 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
       if (intr) {
         stralloc_cats(&res->text, "\n[interrupted by the user]");
         res->iserr = 1;
+      } else if (nhooks) {
+        /* a formatter's or a linter's say goes to the model too */
+        hook(HOOK_AFTER, t, in, n, &res->text, res->iserr, &hookout);
+        if (hookout.len && (!stralloc_cats(&res->text, "\n\n[from the user's "
+            "hooks]\n") || !stralloc_cat(&res->text, &hookout)))
+          nomem();
       }
     }
     if (c == &conv) pending += res->text.len + 100;  /* and its framing */

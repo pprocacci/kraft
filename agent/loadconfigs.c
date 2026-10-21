@@ -72,7 +72,8 @@ loadconfigs(void)
       goto out;
     }
     styled(YELLOW, "This project has settings of its own, which could change "
-        "the permission mode or allow commands to run without asking:");
+        "the permission mode, allow commands to run without asking, or run "
+        "commands of their own (hooks, MCP servers):");
     outs("\n");
     lines("  | ", f.s, f.len, 40);
     flush();

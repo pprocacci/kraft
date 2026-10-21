@@ -40,6 +40,41 @@ setting(void *arg, const char *k, const char *v, unsigned long line)
     ++nrules;
     return 1;
   }
+  if (!str_diff(k, "hook")) {
+    /* hook before|after TOOL COMMAND, or hook done COMMAND */
+    i = byte_chr(v, str_len(v), ' ');
+    if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+    y = !str_diff(word.s, "before") ? HOOK_BEFORE :
+        !str_diff(word.s, "after") ? HOOK_AFTER :
+        !str_diff(word.s, "done") ? HOOK_DONE : 0;
+    if (!y) {
+      kwarn(tmp.s, "a hook is for before, after or done", 0);
+      return 1;
+    }
+    if (nhooks == MAXHOOKS) {
+      kwarn(tmp.s, "too many hooks", 0);
+      return 1;
+    }
+    while (v[i] == ' ' || v[i] == '\t') ++i;
+    hooks[nhooks].tool = 0;
+    if (y != HOOK_DONE) {
+      v += i;
+      i = byte_chr(v, str_len(v), ' ');
+      if (!stralloc_copyb(&word, v, i) || !stralloc_0(&word)) nomem();
+      hooks[nhooks].tool = sdup(word.s);
+      while (v[i] == ' ' || v[i] == '\t') ++i;
+    }
+    if (!v[i] || (hooks[nhooks].tool && !*hooks[nhooks].tool)) {
+      kwarn(tmp.s, y == HOOK_DONE ? "hook done needs a command" :
+          "the hook needs a tool and a command", 0);
+      return 1;
+    }
+    hooks[nhooks].when = y;
+    hooks[nhooks].cmd = sdup(v + i);
+    hooks[nhooks].from = cfgfile;
+    ++nhooks;
+    return 1;
+  }
   if (!str_diff(k, "mcp_header")) {
     /* mcp_header NAME Header: value, with ${VAR} from the environment */
     i = byte_chr(v, str_len(v), ' ');

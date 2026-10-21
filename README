@@ -82,6 +82,11 @@ is asked about unless a rule allows it:
   mcp gh https://api.githubcopilot.com/mcp/
   mcp_header gh Authorization: Bearer ${GITHUB_TOKEN}
 
+Hooks run your commands around tool calls and after tasks:
+
+  hook after edit case "$KRAFT_PATH" in *.c) clang-format -i "$KRAFT_PATH";; esac
+  hook done printf '\a'
+
 With devel/universal-ctags installed the model also gets a symbols
 tool, to find definitions without reading whole files.
 
@@ -94,7 +99,7 @@ At the prompt
   /diff /commit   see the uncommitted changes, or have them committed
   /compact        summarize the conversation to save context
   /usage          tokens, cache hits, context use
-  /rules /mode    the permission rules, and the mode
+  /rules /mode    the permission rules and hooks, and the mode
   /mcp            the MCP servers and their tools
   /help           all of them
 

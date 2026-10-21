@@ -18,11 +18,20 @@ gitstat(stralloc *out)
 void
 task(const char *s, size_t n)
 {
-  static stralloc before, after;
+  static stralloc before, after, said;
 
   gitstat(&before);
   work(s, n);
   save();
+  if (nhooks) {
+    /* a notification, say, or the tests */
+    hook(HOOK_DONE, 0, 0, 0, 0, status != 0, &said);
+    if (said.len) {
+      nl();
+      lines("  hook: ", said.s, said.len, 20);
+      flush();
+    }
+  }
   /* what the task left uncommitted, if it changed that */
   gitstat(&after);
   if (after.len && str_diff(before.s, after.s)) {

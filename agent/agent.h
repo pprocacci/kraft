@@ -257,4 +257,19 @@ int mcpprompt(const char *line);
 int mcpread(const char *server, size_t n, const char *uri, stralloc *out);
 int readresource(const char *in, size_t n, stralloc *out);
 
+/* hooks: commands run around tool calls and after tasks */
+#define HOOK_BEFORE 1
+#define HOOK_AFTER 2
+#define HOOK_DONE 3
+#define MAXHOOKS 64
+struct hook {
+  int when;
+  const char *tool;  /* a glob, or edit; 0 for HOOK_DONE */
+  const char *cmd;
+  const char *from;  /* the config file */
+};
+extern struct hook hooks[MAXHOOKS];
+extern unsigned long nhooks;
+int hook(int when, const struct tool *t, const char *in, size_t n, const stralloc *result, int failed, stralloc *out);
+
 #endif

@@ -96,9 +96,24 @@ showrules(void)
 {
   unsigned long i;
 
-  if (!nrules) {
+  if (!nrules && !nhooks) {
     outs("(no rules; see the PERMISSIONS section of kraft(1))\n");
     return;
+  }
+  for (i = 0; i < nhooks; ++i) {
+    sgr(CYAN);
+    outs(hooks[i].when == HOOK_BEFORE ? "hook before " :
+        hooks[i].when == HOOK_AFTER ? "hook after " : "hook done");
+    if (hooks[i].tool) outs(hooks[i].tool);
+    outs(" ");
+    sgr(0);
+    outs(hooks[i].cmd);
+    sgr(DIM);
+    outs("   (");
+    outs(hooks[i].from);
+    outs(")");
+    sgr(0);
+    outs("\n");
   }
   for (i = 0; i < nrules; ++i) {
     sgr(rules[i].allow ? GREEN : RED);
