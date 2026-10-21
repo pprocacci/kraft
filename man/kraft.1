@@ -1,0 +1,77 @@
+.Dd October 20, 2026
+.Dt KRAFT 1
+.Os
+.Sh NAME
+.Nm kraft
+.Nd coding agent
+.Sh SYNOPSIS
+.Nm
+.Op Fl t
+.Op Fl a Ar api
+.Op Fl m Ar model
+.Op Fl n Ar max_tokens
+.Op Fl u Ar url
+.Op Ar prompt ...
+.Sh DESCRIPTION
+.Nm
+sends
+.Ar prompt
+(or, if none is given, standard input) to a language model and
+streams the reply to standard output.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl a Ar api
+The API to speak:
+.Cm anthropic
+(the Anthropic Messages API,
+.Pa /v1/messages ,
+the default) or
+.Cm openai
+(an OpenAI-compatible Chat Completions API,
+.Pa /v1/chat/completions ) .
+.It Fl m Ar model
+The model to use.
+.It Fl n Ar max_tokens
+The most tokens the model may generate.
+The default is 8192.
+.It Fl t
+Copy the model's reasoning, when the server sends it, to standard
+error.
+.It Fl u Ar url
+The base URL of the server, with or without a trailing
+.Pa /v1 .
+The default is
+.Pa http://127.0.0.1:1234 .
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width ANTHROPIC_API_KEY
+.It Ev KRAFT_API
+Default for
+.Fl a .
+.It Ev KRAFT_MODEL
+Default for
+.Fl m .
+.It Ev KRAFT_URL
+Default for
+.Fl u .
+.It Ev KRAFT_API_KEY
+The key to send.
+If unset,
+.Ev ANTHROPIC_API_KEY
+or
+.Ev OPENAI_API_KEY
+is used, depending on the API.
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 on success, 100 on a permanent failure such as bad usage or
+a rejected request, and 111 on a temporary failure such as a
+network error.
+.Sh EXAMPLES
+Ask an LM Studio server on another machine:
+.Bd -literal -offset indent
+kraft -u http://192.168.10.234:1234 -m qwen/qwen3.8-27b 'Say hi'
+.Ed
+.Sh BUGS
+https URLs are not supported yet.

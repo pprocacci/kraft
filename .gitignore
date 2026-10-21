@@ -1,0 +1,6 @@
+*.o
+*.a
+/kraft
+/t/json
+/t/sse
+/kraft-*.tar.gz

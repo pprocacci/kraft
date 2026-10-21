@@ -1,0 +1,7 @@
+kraft - a coding agent, written in C, for FreeBSD first.
+
+  make && make test
+  ./kraft -u http://host:1234 -m some-model 'Say hi'
+  ./kraft -a openai -u http://host:1234/v1 -m some-model 'Say hi'
+
+See kraft(1) and HACKING.

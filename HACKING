@@ -1,0 +1,45 @@
+Rules of the road
+=================
+
+1. One exported symbol per file.  src/stralloc_cats.c defines
+   stralloc_cats() and nothing else that is visible outside it.
+   Helpers are static.  The file is named after what it exports.
+
+2. One header per family.  include/stralloc.h declares every
+   stralloc_* function.
+
+3. No stdio in the library.  Output goes through buffer_*, numbers
+   through fmt_* and scan_*.  (Tests in t/ may use stdio.)
+
+4. Functions return 1 for success and 0 for failure with errno set,
+   unless the header says otherwise.  No hidden global state.
+
+5. Every src/*.o is archived into libkraft.a; programs link against
+   it so only what they use is pulled in.
+
+6. Exit codes: 0 success, 100 permanent failure (bad usage, bad
+   request), 111 temporary failure (network, out of memory).
+
+7. FreeBSD first.  Use what is in base (kqueue, libedit, OpenSSL,
+   Capsicum) before reaching for a port.
+
+8. Build with FreeBSD make.  No GNU make.
+
+Layout
+------
+
+  kraft.c     the kraft program
+  src/        the library, one function per file
+  include/    the headers
+  t/          tests; run them with make test
+  man/        manual pages
+
+API backends
+------------
+
+Each backend is a pair of functions, PREFIX_body (build a request)
+and PREFIX_delta (handle one stream event), listed in the apis[]
+table in kraft.c:
+
+  anth_*   Anthropic Messages API     POST /v1/messages
+  oai_*    OpenAI Chat Completions    POST /v1/chat/completions
