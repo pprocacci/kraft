@@ -12,6 +12,7 @@
 #include "strerr.h"
 #include "stralloc.h"
 #include "tcp.h"
+#include "tls.h"
 #include "url.h"
 
 #define FATAL "kraft: fatal: "
@@ -120,7 +121,6 @@ main(int argc, char **argv)
   if (!prompt.len) strerr_die(100, FATAL, "empty prompt", 0);
 
   if (!url_parse(&url, base)) strerr_die(100, FATAL, "bad URL: ", base);
-  if (url.tls) strerr_die(100, FATAL, "https is not supported yet", 0);
 
   /* accept base URLs given with or without a trailing /v1 */
   i = url.path.len - 1;
@@ -134,7 +134,7 @@ main(int argc, char **argv)
     if (!stralloc_cats(&host, url.host.s)) nomem();
     if (!stralloc_cats(&host, "]")) nomem();
   } else if (!stralloc_copys(&host, url.host.s)) nomem();
-  if (str_diff(url.port.s, "80")) {
+  if (str_diff(url.port.s, url.tls ? "443" : "80")) {
     if (!stralloc_cats(&host, ":")) nomem();
     if (!stralloc_cats(&host, url.port.s)) nomem();
   }
@@ -156,6 +156,8 @@ main(int argc, char **argv)
 
   fd = tcp_connect(url.host.s, url.port.s);
   if (fd == -1) strerr_sys(111, FATAL, "unable to connect to ", base);
+  if (url.tls && (fd = tls_connect(fd, url.host.s)) == -1)
+    strerr_sys(111, FATAL, "unable to start TLS with ", base);
   if (!http_request(fd, "POST", host.s, path.s, hdrs.s, body.s, body.len))
     strerr_sys(111, FATAL, "unable to send request to ", base);
   r = http_response(&http, fd);

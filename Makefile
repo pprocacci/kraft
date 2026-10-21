@@ -9,6 +9,7 @@ CC?=		cc
 AR?=		ar
 CFLAGS?=	-O2 -pipe
 CFLAGS+=	-Wall -Wextra -Iinclude
+LDLIBS?=	-lssl -lcrypto
 INSTALL_PROGRAM?=	install -m 555
 INSTALL_MAN?=	install -m 444
 
@@ -21,7 +22,7 @@ TESTS=		t/json t/sse
 all: kraft
 
 kraft: kraft.o libkraft.a
-	${CC} ${LDFLAGS} -o kraft kraft.o libkraft.a
+	${CC} ${LDFLAGS} -o kraft kraft.o libkraft.a ${LDLIBS}
 
 libkraft.a: ${LIBOBJS}
 	rm -f libkraft.a
