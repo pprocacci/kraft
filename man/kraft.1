@@ -62,6 +62,10 @@ context window,
 has the model summarize it, and carries on with the summary in its
 place.
 It does the same, once, if the server refuses a request as too long.
+A request that fails for a reason that may pass (no connection, a
+busy or overloaded server, a reply cut short) is tried up to five
+more times, after 2, 4, 8, 16 and 32 seconds, or as long as the
+server asks.
 With the Anthropic API, requests use prompt caching, so the
 unchanging start of each request is billed at a fraction of the
 usual price.
@@ -279,6 +283,15 @@ At the prompt:
 Forget the conversation.
 .It Cm /compact
 Replace the conversation with a summary of it, to save space.
+.It Cm /undo
+Put back the files that the last task with file changes wrote or
+edited, and remove those it created; again, to go further back.
+Only changes made with
+.Cm write_file ,
+.Cm edit_file
+and
+.Cm multi_edit
+can be undone, not what commands did.
 .It Cm /usage
 Show the tokens used this session: input, how much of it was read
 from or written to the prompt cache, output, and roughly how full
@@ -347,6 +360,10 @@ Saved conversations, one file per session, rewritten after every
 step and readable only by you.
 They hold everything the model saw, file contents included; remove
 old ones when they are no longer wanted.
+Beside each is a
+.Pa .undo
+directory holding the files as they were before each change, for
+.Cm /undo .
 .It Pa KRAFT.md
 Project instructions, read from the current directory and given to
 the model.

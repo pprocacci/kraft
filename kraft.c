@@ -37,6 +37,7 @@
 #include "tls.h"
 #include "tool.h"
 #include "ui.h"
+#include "undo.h"
 #include "url.h"
 
 #ifndef KRAFT_VERSION
@@ -841,6 +842,89 @@ sessdir(stralloc *d)
   return 1;
 }
 
+/*
+ * Undo.  Before a tool writes a file, the file is saved in the
+ * session's .undo directory, tagged with the task; /undo puts back
+ * the files the last task changed.  Changes made by commands are not
+ * seen, so cannot be undone.
+ */
+
+static stralloc undodir;       /* the session's, or empty */
+static unsigned long undoseq;  /* the last entry */
+static unsigned long taskno;   /* the task under way, from 1 */
+
+/* the undo directory goes with the session file; carries on its count */
+static void
+setundo(void)
+{
+  stralloc p = STRALLOC_ZERO, d = STRALLOC_ZERO;
+  unsigned long t;
+  int ex;
+
+  undoseq = taskno = 0;
+  if (!stralloc_copys(&undodir, "")) nomem();
+  if (sessfn.len < 6) return;
+  if (!stralloc_copyb(&undodir, sessfn.s, str_len(sessfn.s) - 5) ||
+      !stralloc_cats(&undodir, ".undo") || !stralloc_0(&undodir))
+    nomem();
+  --undodir.len;  /* NUL-terminated, but paths are built on the end of it */
+  while (undo_load(undodir.s, undoseq + 1, &t, &p, &d, &ex)) {
+    ++undoseq;
+    if (t > taskno) taskno = t;
+  }
+  stralloc_free(&p);
+  stralloc_free(&d);
+}
+
+/* puts back the files the last task with changes wrote; 1 if any */
+static int
+undo(void)
+{
+  stralloc p = STRALLOC_ZERO, d = STRALLOC_ZERO, names = STRALLOC_ZERO;
+  stralloc fn = STRALLOC_ZERO;
+  struct msg *m;
+  struct block *b;
+  unsigned long t, task = 0;
+  int ex, n = 0;
+
+  for (; undoseq && undo_load(undodir.s, undoseq, &t, &p, &d, &ex); --undoseq) {
+    if (!task) task = t;
+    if (t != task) break;
+    if (ex ? !file_put(p.s, d.s, d.len) : (unlink(p.s) == -1 && errno != ENOENT))
+      warnsys("unable to put back ", p.s);
+    else {
+      sgr(DIM);
+      outs(ex ? "  restored " : "  removed ");
+      outs(p.s);
+      sgr(0);
+      outs("\n");
+      if (n++ && !stralloc_cats(&names, ", ")) nomem();
+      if (!stralloc_cat(&names, &p)) nomem();
+    }
+    if (!stralloc_copy(&fn, &undodir) || !stralloc_cats(&fn, "/") ||
+        !stralloc_catulong(&fn, undoseq) || !stralloc_0(&fn))
+      nomem();
+    unlink(fn.s);
+  }
+  if (n) {
+    /* the model's picture of those files is out of date now */
+    if (!(m = conv_msg(&conv, ROLE_USER)) || !(b = conv_block(m, BLK_TEXT)))
+      nomem();
+    if (!stralloc_copys(&b->text, "[The user undid the file changes made in "
+        "an earlier task. These are back as they were before it: ") ||
+        !stralloc_cat(&b->text, &names) ||
+        !stralloc_cats(&b->text, ". Read them again before relying on "
+        "their contents.]"))
+      nomem();
+    pending += b->text.len;
+  }
+  stralloc_free(&p);
+  stralloc_free(&d);
+  stralloc_free(&names);
+  stralloc_free(&fn);
+  return n > 0;
+}
+
 /* picks a new session file; nothing is written until there is a message */
 static void
 newsession(void)
@@ -856,6 +940,7 @@ newsession(void)
       !stralloc_catulong(&sessfn, (unsigned long)getpid()) ||
       !stralloc_cats(&sessfn, ".json") || !stralloc_0(&sessfn))
     nomem();
+  setundo();
 }
 
 static void
@@ -936,6 +1021,7 @@ resume(void)
     goto out;
   }
   if (!stralloc_copy(&sessfn, &best)) nomem();
+  setundo();
   pending = s.len;  /* about the size of the conversation, for compacting */
 
   /* a reminder of where things stood */
@@ -1350,7 +1436,7 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
   struct block *b, *res;
   const char *in;
   size_t i, n;
-  int r;
+  int r, snap;
 
   if (!(u = conv_msg(c, ROLE_USER))) nomem();
   a = &c->m[c->n - 2];
@@ -1390,7 +1476,20 @@ runtools(struct conv *c, const struct tool *tl, int cut, int sub)
       if (!stralloc_copy(&res->text, &mwhy)) nomem();
       res->iserr = r < 0;
     } else {
+      /* what the file was before, for /undo */
+      snap = undodir.len && (!str_diff(t->name, "write_file") ||
+          !str_diff(t->name, "edit_file") || !str_diff(t->name, "multi_edit")) &&
+          tool_arg(in, n, "path", &tmp) &&
+          undo_save(undodir.s, undoseq + 1, taskno, tmp.s);
+      if (snap) ++undoseq;
       res->iserr = !t->run(in, n, &res->text);
+      if (snap && res->iserr) {
+        /* nothing changed after all */
+        if (!stralloc_copy(&tmp, &undodir) || !stralloc_cats(&tmp, "/") ||
+            !stralloc_catulong(&tmp, undoseq--) || !stralloc_0(&tmp))
+          nomem();
+        unlink(tmp.s);
+      }
       if (intr) {
         stralloc_cats(&res->text, "\n[interrupted by the user]");
         res->iserr = 1;
@@ -1524,6 +1623,7 @@ work(const char *s, size_t n)
   int step, r, stop, retried = 0;
 
   intr = 0;
+  ++taskno;  /* for /undo */
   if (!(m = conv_msg(&conv, ROLE_USER))) nomem();
   if (!(b = conv_block(m, BLK_TEXT))) nomem();
   if (!stralloc_copyb(&b->text, s, n)) nomem();
@@ -1590,6 +1690,8 @@ help(void)
       "              /mode auto   the rules, then a check by the model\n"
       "                           for what the rules cannot settle\n"
       "              /mode yes    never ask\n"
+      "  /undo     put back the files the last task changed (again to go\n"
+      "            further back); changes made by commands are not undone\n"
       "  /usage    show tokens used, cache hits, and context size\n"
       "  /help     show this\n"
       "  /exit     quit (or press ctrl-d)\n"
@@ -1907,6 +2009,11 @@ main(int argc, char **argv)
     }
     if (!str_diff(line.s, "/mode")) { showmode(); continue; }
     if (!str_diff(line.s, "/usage")) { showusage(); continue; }
+    if (!str_diff(line.s, "/undo")) {
+      if (undo()) save();
+      else outs("(nothing to undo)\n");
+      continue;
+    }
     if (!str_diff(line.s, "/compact")) {
       intr = 0;
       if (!conv.n) outs("(nothing to compact)\n");
