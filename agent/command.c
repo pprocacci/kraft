@@ -289,7 +289,7 @@ command(const char *line)
     else if (compact(0)) save();
     return 1;
   }
-  if (custom(line)) return 1;
+  if (mcpprompt(line) || custom(line)) return 1;
   /* "/usr/src: why does this fail?" is a task; "/nosuch" a typo */
   for (s = line + 1; *s && *s != ' ' && *s != '/'; ++s) ;
   if (*s != '/') {

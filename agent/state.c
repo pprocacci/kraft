@@ -229,3 +229,17 @@ struct mcp mcps[MAXMCP];
 unsigned long nmcps;
 struct tool mcptools[MAXMCPTOOLS];
 unsigned long nmcptools;
+struct mcpprompt mcpprompts[MAXMCPPROMPTS];
+unsigned long nmcpprompts;
+struct mcpres mcpres[MAXMCPRES];
+unsigned long nmcpres;
+
+/* MCP resources, for the model; its description, the list, is made later */
+struct tool restool = {
+  "read_resource", 0,
+  "{\"type\":\"object\",\"properties\":{"
+  "\"server\":{\"type\":\"string\",\"description\":\"The MCP server's name\"},"
+  "\"uri\":{\"type\":\"string\",\"description\":\"The resource's URI\"}},"
+  "\"required\":[\"server\",\"uri\"]}",
+  0, readresource, 0, 0, 0
+};

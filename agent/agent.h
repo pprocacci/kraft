@@ -233,4 +233,28 @@ void mcpstop(void);
 int mcpcall(const struct tool *t, const char *in, size_t n, stralloc *out);
 void mcplist(void);
 
+/* MCP servers' prompts (as /server:prompt) and resources */
+#define MAXMCPPROMPTS 200
+#define MAXPROMPTARGS 16
+#define MAXMCPRES 500
+struct mcpprompt {
+  int srv;  /* from 1 */
+  const char *name, *desc;
+  const char *args[MAXPROMPTARGS];
+  int req[MAXPROMPTARGS];
+  int nargs;
+};
+struct mcpres {
+  int srv;
+  const char *uri, *name;
+};
+extern struct mcpprompt mcpprompts[MAXMCPPROMPTS];
+extern unsigned long nmcpprompts;
+extern struct mcpres mcpres[MAXMCPRES];
+extern unsigned long nmcpres;
+extern struct tool restool;
+int mcpprompt(const char *line);
+int mcpread(const char *server, size_t n, const char *uri, stralloc *out);
+int readresource(const char *in, size_t n, stralloc *out);
+
 #endif

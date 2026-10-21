@@ -1,7 +1,47 @@
 #include "agent.h"
 
+static int resource(struct msg *m, const char *p);
 static void mentions(struct msg *m, const char *s, size_t n);
 static void interrupted(void);
+
+/*
+ * @server:uri names an MCP server's resource: its text goes in m.
+ * returns 1 if p was one of those (read or not).
+ */
+static int
+resource(struct msg *m, const char *p)
+{
+  stralloc text = STRALLOC_ZERO;
+  struct block *b;
+  size_t c = byte_chr(p, str_len(p), ':');
+  unsigned long k;
+
+  for (k = 0; k < nmcps; ++k)
+    if (str_len(mcps[k].name) == c && !byte_diff(mcps[k].name, c, p)) break;
+  if (!p[c] || k == nmcps) return 0;
+  if (!mcpread(p, c, p + c + 1, &text)) {
+    if (!stralloc_0(&text)) nomem();
+    outs("(");
+    outs(text.s);
+    outs(")\n");
+  } else {
+    if (!(b = conv_block(m, BLK_TEXT))) nomem();
+    if (!stralloc_copys(&b->text, "The resource ") ||
+        !stralloc_cats(&b->text, p + c + 1) ||
+        !stralloc_cats(&b->text, " from MCP server ") ||
+        !stralloc_cats(&b->text, mcps[k].name) ||
+        !stralloc_cats(&b->text, ":\n\n") || !stralloc_cat(&b->text, &text))
+      nomem();
+    pending += b->text.len;
+    sgr(DIM);
+    outs("(attached ");
+    outs(p);
+    outs(")\n");
+    sgr(0);
+  }
+  stralloc_free(&text);
+  return 1;
+}
 
 /* attaches the files named @path in the user's words s to message m */
 static void
@@ -21,6 +61,10 @@ mentions(struct msg *m, const char *s, size_t n)
       --e;
     if (e == i + 1) continue;
     if (!stralloc_copyb(&p, s + i + 1, e - i - 1) || !stralloc_0(&p)) nomem();
+    if (resource(m, p.s)) {
+      i = e;
+      continue;
+    }
     if (!stralloc_copys(&why, "")) nomem();
     if (attach(m, &noid, p.s, &why) && why.len) {
       if (!stralloc_0(&why)) nomem();

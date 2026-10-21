@@ -15,8 +15,25 @@ settools(void)
     tools[i] = tool_all[i];
   tools[i++] = tasktool;
   if (access(UCTAGS, X_OK) == 0) tools[i++] = tool_symbol;
-  for (r = 0; r < nmcptools && i < sizeof tools / sizeof tools[0] - 2; ++r)
+  for (r = 0; r < nmcptools && i < sizeof tools / sizeof tools[0] - 3; ++r)
     tools[i++] = mcptools[r];
+  if (nmcpres) {
+    /* what there is to read goes in the description */
+    if (!stralloc_copys(&tmp, "Read a resource that an MCP server offers: "
+        "documents, records, files and the like, as text. Some of them:\n"))
+      nomem();
+    for (r = 0; r < nmcpres && r < 50; ++r)
+      if (!stralloc_cats(&tmp, "server ") ||
+          !stralloc_cats(&tmp, mcps[mcpres[r].srv - 1].name) ||
+          !stralloc_cats(&tmp, ", uri ") || !stralloc_cats(&tmp, mcpres[r].uri) ||
+          (*mcpres[r].name && (!stralloc_cats(&tmp, ": ") ||
+          !stralloc_cats(&tmp, mcpres[r].name))) || !stralloc_cats(&tmp, "\n"))
+        nomem();
+    if (nmcpres > 50 && !stralloc_cats(&tmp, "and more.\n")) nomem();
+    if (!stralloc_0(&tmp)) nomem();
+    restool.desc = sdup(tmp.s);
+    tools[i++] = restool;
+  }
   if (websearch) {
     if (pdfok)
       tools[i++] = searchtool;

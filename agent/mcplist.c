@@ -30,5 +30,38 @@ mcplist(void)
         outs(mcptools[i].name);
         outs("\n");
       }
+    for (i = 0; i < nmcpprompts; ++i)
+      if (mcpprompts[i].srv == (int)k + 1) {
+        outs("  /");
+        outs(mcps[k].name);
+        outs(":");
+        outs(mcpprompts[i].name);
+        for (c = 0; c < (unsigned long)mcpprompts[i].nargs; ++c) {
+          outs(mcpprompts[i].req[c] ? " " : " [");
+          outs(mcpprompts[i].args[c]);
+          if (!mcpprompts[i].req[c]) outs("]");
+        }
+        if (*mcpprompts[i].desc) {
+          sgr(DIM);
+          outs("  ");
+          outs(mcpprompts[i].desc);
+          sgr(0);
+        }
+        outs("\n");
+      }
+    for (i = 0; i < nmcpres; ++i)
+      if (mcpres[i].srv == (int)k + 1) {
+        outs("  @");
+        outs(mcps[k].name);
+        outs(":");
+        outs(mcpres[i].uri);
+        if (*mcpres[i].name) {
+          sgr(DIM);
+          outs("  ");
+          outs(mcpres[i].name);
+          sgr(0);
+        }
+        outs("\n");
+      }
   }
 }

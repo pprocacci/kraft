@@ -50,7 +50,9 @@ is set.
 A word
 .Ar @path
 in a task attaches that file, if it is an image or (with the
-Anthropic API) a PDF, for the model to see.
+Anthropic API) a PDF, for the model to see;
+.Ar @server : Ns Ar uri
+attaches the text of an MCP server's resource.
 .Pp
 The conversation is kept between tasks, so later tasks can refer to
 earlier ones, and saved, so that
@@ -409,6 +411,16 @@ As there is no knowing what another program's tools do, every call
 is subject to the permission mode; a rule such as
 .Ql allow mcp__fs__* *
 allows a server's tools without asking.
+.Pp
+A server's prompts become commands,
+.Cm / Ns Ar name : Ns Ar prompt Op Ar arguments :
+the arguments, separated by spaces, fill the prompt's in order, the
+last taking the rest of the line, and the prompt the server makes of
+them is shown and run as a task.
+Its resources can be attached to a task with
+.Ar @name : Ns Ar uri ,
+and read by the model with
+.Cm read_resource .
 .Sh TOOLS
 The model may call these tools; those marked with an asterisk are
 subject to the permission mode.
@@ -455,6 +467,10 @@ or glob, kind and path, or outline a file, with
 Offered only if
 .Pa devel/universal-ctags
 is installed.
+.It Cm read_resource
+Read an MCP server's resource, as text.
+Offered only if a server has resources; some of them are named in the
+tool's description.
 .It Cm web_fetch Ns *
 Fetch an http or https URL and return its text, HTML turned into
 plain text.
@@ -529,7 +545,8 @@ can be undone, not what commands did.
 .It Cm /rules
 List the permission rules in force, and where each came from.
 .It Cm /mcp
-List the MCP servers, whether each is running, and their tools.
+List the MCP servers, whether each is running, and their tools,
+prompts and resources.
 .It Cm /diff
 Show the uncommitted changes, in a git repository.
 .It Cm /commit

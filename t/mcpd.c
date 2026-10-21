@@ -65,7 +65,48 @@ handle(const char *buf, size_t n)
   if (!json_get(buf, n, "id", &id, &idn)) return 0;  /* a notification */
   if (json_is(m, mn, "initialize"))
     reply(id, idn, "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":"
-        "{\"tools\":{}},\"serverInfo\":{\"name\":\"mcpd\",\"version\":\"1\"}}");
+        "{\"tools\":{},\"prompts\":{},\"resources\":{}},\"serverInfo\":"
+        "{\"name\":\"mcpd\",\"version\":\"1\"}}");
+  else if (json_is(m, mn, "prompts/list"))
+    reply(id, idn, "{\"prompts\":[{\"name\":\"greet\",\"description\":"
+        "\"Greet someone\",\"arguments\":[{\"name\":\"who\",\"required\":true},"
+        "{\"name\":\"tone\"}]}]}");
+  else if (json_is(m, mn, "prompts/get")) {
+    stralloc_copys(&s, "Say hello to ");
+    if (json_get(buf, n, "params.arguments.who", &v, &vn)) json_unstr(&s, v, vn);
+    stralloc_cats(&s, " in a ");
+    if (json_get(buf, n, "params.arguments.tone", &v, &vn)) json_unstr(&s, v, vn);
+    else stralloc_cats(&s, "plain");
+    stralloc_cats(&s, " way.");
+    {
+      stralloc r = STRALLOC_ZERO;
+
+      stralloc_copys(&r, "{\"messages\":[{\"role\":\"user\",\"content\":"
+          "{\"type\":\"text\",\"text\":");
+      json_str(&r, s.s, s.len);
+      stralloc_cats(&r, "}}]}");
+      stralloc_0(&r);
+      reply(id, idn, r.s);
+      stralloc_free(&r);
+    }
+  } else if (json_is(m, mn, "resources/list"))
+    reply(id, idn, "{\"resources\":[{\"uri\":\"toy://motd\",\"name\":"
+        "\"Message of the day\",\"mimeType\":\"text/plain\"},{\"uri\":"
+        "\"toy://logo\",\"name\":\"Logo\",\"mimeType\":\"image/png\"}]}");
+  else if (json_is(m, mn, "resources/read") &&
+      json_get(buf, n, "params.uri", &v, &vn) && json_is(v, vn, "toy://motd"))
+    reply(id, idn, "{\"contents\":[{\"uri\":\"toy://motd\",\"mimeType\":"
+        "\"text/plain\",\"text\":\"Be excellent to each other.\"}]}");
+  else if (json_is(m, mn, "resources/read") &&
+      json_get(buf, n, "params.uri", &v, &vn) && json_is(v, vn, "toy://logo"))
+    reply(id, idn, "{\"contents\":[{\"uri\":\"toy://logo\",\"mimeType\":"
+        "\"image/png\",\"blob\":\"AAAA\"}]}");
+  else if (json_is(m, mn, "resources/read")) {
+    stralloc_cats(&o, "{\"jsonrpc\":\"2.0\",\"id\":");
+    stralloc_catb(&o, id, idn);
+    stralloc_cats(&o, ",\"error\":{\"code\":-32002,\"message\":"
+        "\"no such resource\"}}\n");
+  }
   else if (json_is(m, mn, "tools/list") &&
       !json_get(buf, n, "params.cursor", &v, &vn))
     reply(id, idn, "{\"tools\":[{\"name\":\"echo\",\"description\":"

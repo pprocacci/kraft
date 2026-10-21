@@ -78,15 +78,112 @@ addtool(unsigned long k, const char *t, size_t tn)
   x->mcp = (int)k + 1;
 }
 
+/* adds prompt p of server number k */
+static void
+addprompt(unsigned long k, const char *p, size_t pn)
+{
+  static stralloc s;
+  struct mcpprompt *x;
+  const char *v;
+  size_t vn;
+  unsigned long i;
+
+  if (nmcpprompts == MAXMCPPROMPTS) return;
+  x = &mcpprompts[nmcpprompts];
+  if (!json_get(p, pn, "name", &v, &vn) || !stralloc_copys(&s, "") ||
+      !json_unstr(&s, v, vn) || !s.len || !stralloc_0(&s))
+    return;
+  x->name = sdup(s.s);
+  if (!stralloc_copys(&s, "")) nomem();
+  if (json_get(p, pn, "description", &v, &vn) && !json_unstr(&s, v, vn))
+    s.len = 0;
+  if (!stralloc_0(&s)) nomem();
+  x->desc = sdup(s.s);
+  for (x->nargs = 0; x->nargs < MAXPROMPTARGS; ++x->nargs) {
+    if (!stralloc_copys(&tmp, "arguments.") ||
+        !stralloc_catulong(&tmp, (unsigned long)x->nargs) ||
+        !stralloc_cats(&tmp, ".name") || !stralloc_0(&tmp))
+      nomem();
+    if (!json_get(p, pn, tmp.s, &v, &vn)) break;
+    if (!stralloc_copys(&s, "") || !json_unstr(&s, v, vn) || !stralloc_0(&s))
+      nomem();
+    i = (unsigned long)x->nargs;
+    x->args[i] = sdup(s.s);
+    tmp.len -= 5;  /* "arguments.N.required" */
+    if (!stralloc_cats(&tmp, "required") || !stralloc_0(&tmp)) nomem();
+    x->req[i] = json_get(p, pn, tmp.s, &v, &vn) && vn == 4 &&
+        !byte_diff(v, 4, "true");
+  }
+  x->srv = (int)k + 1;
+  ++nmcpprompts;
+}
+
+/* adds resource r of server number k */
+static void
+addresource(unsigned long k, const char *r, size_t rn)
+{
+  static stralloc s;
+  struct mcpres *x;
+  const char *v;
+  size_t vn;
+
+  if (nmcpres == MAXMCPRES) return;
+  x = &mcpres[nmcpres];
+  if (!json_get(r, rn, "uri", &v, &vn) || !stralloc_copys(&s, "") ||
+      !json_unstr(&s, v, vn) || !s.len || !stralloc_0(&s))
+    return;
+  x->uri = sdup(s.s);
+  if (!stralloc_copys(&s, "")) nomem();
+  if (json_get(r, rn, "name", &v, &vn) && !json_unstr(&s, v, vn)) s.len = 0;
+  if (!stralloc_0(&s)) nomem();
+  x->name = sdup(s.s);
+  x->srv = (int)k + 1;
+  ++nmcpres;
+}
+
+/*
+ * calls method (a list) on server k, page by page, and fn on each item
+ * of the result's key; 1 if all went well, else 0 with why
+ */
+static int
+list(unsigned long k, const char *method, const char *key,
+    void (*fn)(unsigned long, const char *, size_t), stralloc *why)
+{
+  static stralloc res, params;
+  const char *v;
+  size_t vn;
+  unsigned long i, pages;
+
+  if (!stralloc_copys(&params, "{}") || !stralloc_0(&params)) nomem();
+  for (pages = 0; pages < 20; ++pages) {
+    if (!mcp_rpc(&mcps[k], method, params.s, &res, STARTSECS, &intr)) {
+      if (!stralloc_copy(why, &res)) nomem();
+      return 0;
+    }
+    for (i = 0; ; ++i) {
+      if (!stralloc_copys(&tmp, key) || !stralloc_cats(&tmp, ".") ||
+          !stralloc_catulong(&tmp, i) || !stralloc_0(&tmp))
+        nomem();
+      if (!json_get(res.s, res.len, tmp.s, &v, &vn)) break;
+      fn(k, v, vn);
+    }
+    if (!json_get(res.s, res.len, "nextCursor", &v, &vn) || *v != '"') break;
+    if (!stralloc_copys(&params, "{\"cursor\":") ||
+        !stralloc_catb(&params, v, vn) || !stralloc_cats(&params, "}") ||
+        !stralloc_0(&params))
+      nomem();
+  }
+  return 1;
+}
+
 /* starts server k and learns its tools; 1 if all went well */
 static int
 start(unsigned long k, stralloc *why)
 {
-  static stralloc log, res, params;
+  static stralloc log, init;
   struct mcp *m = &mcps[k];
   const char *v, *home = env("HOME", 0);
   size_t vn;
-  unsigned long i, pages;
 
   if (!stralloc_copys(&log, "")) nomem();
   if (home && sessdir(&tmp)) {  /* makes ~/.kraft if need be */
@@ -99,29 +196,20 @@ start(unsigned long k, stralloc *why)
   if (!mcp_start(m, log.len > 1 ? log.s : 0, why)) return 0;
   if (!mcp_rpc(m, "initialize", "{\"protocolVersion\":\"2025-06-18\","
       "\"capabilities\":{},\"clientInfo\":{\"name\":\"kraft\",\"version\":\""
-      KRAFT_VERSION "\"}}", why, STARTSECS, &intr))
+      KRAFT_VERSION "\"}}", &init, STARTSECS, &intr)) {
+    if (!stralloc_copy(why, &init)) nomem();
     return 0;
+  }
   mcp_send(m, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
       str_len("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"));
-  if (!stralloc_copys(&params, "{}") || !stralloc_0(&params)) nomem();
-  for (pages = 0; pages < 20; ++pages) {
-    if (!mcp_rpc(m, "tools/list", params.s, &res, STARTSECS, &intr)) {
-      if (!stralloc_copy(why, &res)) nomem();
-      return 0;
-    }
-    for (i = 0; json_get(res.s, res.len, "tools", &v, &vn); ++i) {
-      if (!stralloc_copys(&tmp, "tools.") || !stralloc_catulong(&tmp, i) ||
-          !stralloc_0(&tmp))
-        nomem();
-      if (!json_get(res.s, res.len, tmp.s, &v, &vn)) break;
-      addtool(k, v, vn);
-    }
-    if (!json_get(res.s, res.len, "nextCursor", &v, &vn) || *v != '"') break;
-    if (!stralloc_copys(&params, "{\"cursor\":") ||
-        !stralloc_catb(&params, v, vn) || !stralloc_cats(&params, "}") ||
-        !stralloc_0(&params))
-      nomem();
-  }
+  if (!list(k, "tools/list", "tools", addtool, why)) return 0;
+  /* the extras: without them the server is still of use */
+  if (json_get(init.s, init.len, "capabilities.prompts", &v, &vn) &&
+      !list(k, "prompts/list", "prompts", addprompt, why))
+    kwarn("MCP server ", m->name, ": unable to list its prompts");
+  if (json_get(init.s, init.len, "capabilities.resources", &v, &vn) &&
+      !list(k, "resources/list", "resources", addresource, why))
+    kwarn("MCP server ", m->name, ": unable to list its resources");
   return 1;
 }
 

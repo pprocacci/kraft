@@ -254,6 +254,30 @@ req 1 '"properties":{}'
 req 2 '42'
 req 2 'it failed'
 
+setup "MCP: prompts as commands, resources by @ and by tool" <<EOF
+reply
+text Hello, Kim!
+reply
+tool read_resource {"server":"toy","uri":"toy://logo"}
+tool read_resource {"server":"toy","uri":"toy://nope"}
+reply
+text It says to be excellent.
+EOF
+echo "mcp toy $top/t/mcpd" > "$T/home/.kraft/config"
+printf '/toy:greet Kim very cheerful\nwhat does @toy:toy://motd say?\n/toy:greet\n/mcp\n' |
+    run -P yes
+status 0
+req 1 "Say hello to Kim in a very cheerful way."
+req 1 '"read_resource"'
+req 1 "toy://motd: Message of the day"
+req 2 "Be excellent to each other."
+req 3 "binary image/png, not shown"
+req 3 "no such resource"
+reqs 3
+err "the prompt needs who"
+out "/toy:greet who \[tone\]"
+out "@toy:toy://motd"
+
 setup "MCP: a server that will not start" <<EOF
 reply
 text OK.
