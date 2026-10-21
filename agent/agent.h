@@ -213,5 +213,7 @@ void repl(void);
 void findwindow(void);
 void newsession(void);
 void memory(stralloc *s);
+int custom(const char *line);
+void customs(void);
 
 #endif

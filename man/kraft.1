@@ -412,6 +412,21 @@ At the prompt:
 .Bl -tag -width "/compact"
 .It Cm /clear
 Forget the conversation.
+.It Cm / Ns Ar name Op Ar arguments
+Run a command of your own: the prompt in
+.Pa .kraft/commands/ Ns Ar name Ns Pa .md
+in the project or, failing that,
+.Pa ~/.kraft/commands/ Ns Ar name Ns Pa .md ,
+with
+.Ql $ARGUMENTS
+in it replaced by the
+.Ar arguments
+(or the arguments added at the end, if it has no
+.Ql $ARGUMENTS ) .
+The first line of the file describes it, for
+.Cm /help .
+A project's command is shown before it runs, since it came with the
+project.
 .It Cm /init
 Have the model look around the project and write a
 .Pa KRAFT.md

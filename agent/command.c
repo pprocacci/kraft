@@ -25,7 +25,9 @@ help(void)
       "  /commit   have the model commit them, with a fitting message\n"
       "  /help     show this\n"
       "  /exit     quit (or press ctrl-d)\n"
-      "^C stops the current reply or command.\n");
+      "^C stops the current reply or command.\n"
+      "Your own commands, from .kraft/commands/ and ~/.kraft/commands/:\n");
+  customs();
 }
 
 static void
@@ -251,6 +253,7 @@ command(const char *line)
     else if (compact(0)) save();
     return 1;
   }
+  if (custom(line)) return 1;
   /* "/usr/src: why does this fail?" is a task; "/nosuch" a typo */
   for (s = line + 1; *s && *s != ' ' && *s != '/'; ++s) ;
   if (*s != '/') {
